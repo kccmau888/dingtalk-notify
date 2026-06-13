@@ -1,6 +1,6 @@
 
 // ============================================
-// 缓存辅助函数
+// Initial First Deployment
 // ============================================
 
 async function getCachedAccessToken(env) {
@@ -1141,5 +1141,4 @@ function escapeHtml(str) {
     if (m === '>') return '&gt;';
     return m;
   });
-}/ /   t r i g g e r   b u i l d  
- 
+}
