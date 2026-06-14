@@ -1,4 +1,3 @@
-
 // ============================================
 // Initial First Deployment
 // ============================================
@@ -69,6 +68,20 @@ function getParamFromLandingPage(landing_page, paramName) {
   } catch (e) {
     return '';
   }
+}
+
+// ============================================
+// NEW: Function to capture client information from request headers
+// ============================================
+function getClientInfo(request) {
+  return {
+    user_ip: request.headers.get('CF-Connecting-IP') || 
+             request.headers.get('X-Forwarded-For') || 
+             request.headers.get('X-Real-IP') || 
+             'unknown',
+    user_country: request.headers.get('CF-IPCountry') || 'unknown',
+    user_agent: request.headers.get('User-Agent') || 'unknown'
+  };
 }
 
 async function handleTestMessage(env) {
@@ -177,15 +190,6 @@ async function handleTestMessage(env) {
   });
 }
 
-
-
-
-
-
-
-
-
-
 // 在你的 fetch 函数中，放在最开头（其他路由之前）
 export default {
   async fetch(request, env, ctx) {
@@ -199,85 +203,39 @@ export default {
       return handleTestMessage(env);
     }
 
+    // ============================================
+    // NEW: IP Test Route
+    // ============================================
+    if (path === '/test-ip' && request.method === 'GET') {
+      const clientInfo = getClientInfo(request);
+      return new Response(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>IP Capture Test</title>
+          <style>
+            body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+            h1 { color: #4ec9b0; }
+            .info { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-top: 20px; }
+            .label { color: #9cdcfe; font-weight: bold; }
+            .value { color: #4ec9b0; margin-left: 10px; }
+          </style>
+        </head>
+        <body>
+          <h1>🌐 IP Capture Test</h1>
+          <div class="info">
+            <div><span class="label">User IP:</span> <span class="value">${escapeHtml(clientInfo.user_ip)}</span></div>
+            <div><span class="label">Country:</span> <span class="value">${escapeHtml(clientInfo.user_country)}</span></div>
+            <div><span class="label">User Agent:</span> <span class="value">${escapeHtml(clientInfo.user_agent)}</span></div>
+          </div>
+        </body>
+        </html>
+      `, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+    }
 
-
-    // ============================================
-    // 1. 验证页面路由
-    // ============================================
-// In your fetch function, after the existing /test route
-if (path === '/test-ip' && request.method === 'GET') {
-  // Capture all possible IP headers
-  const ip = request.headers.get('CF-Connecting-IP') || 
-             request.headers.get('X-Forwarded-For') || 
-             request.headers.get('X-Real-IP') ||
-             'unknown';
-  
-  const country = request.headers.get('CF-IPCountry') || 'unknown';
-  const city = request.headers.get('CF-IPCity') || 'unknown';
-  const userAgent = request.headers.get('User-Agent') || 'unknown';
-  
-  // Return HTML page with IP info
-  return new Response(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <title>IP Capture Test</title>
-      <style>
-        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
-        h1 { color: #4ec9b0; }
-        .info { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-top: 20px; }
-        .label { color: #9cdcfe; font-weight: bold; }
-        .value { color: #4ec9b0; margin-left: 10px; }
-        .note { margin-top: 20px; padding: 10px; background: #2d2d2d; border-left: 3px solid #f48771; font-size: 12px; }
-      </style>
-    </head>
-    <body>
-      <h1>🌐 IP Capture Test</h1>
-      <div class="info">
-        <div><span class="label">CF-Connecting-IP:</span> <span class="value">${escapeHtml(ip)}</span></div>
-        <div><span class="label">CF-IPCountry:</span> <span class="value">${escapeHtml(country)}</span></div>
-        <div><span class="label">CF-IPCity:</span> <span class="value">${escapeHtml(city)}</span></div>
-        <div><span class="label">User-Agent:</span> <span class="value">${escapeHtml(userAgent)}</span></div>
-        <div><span class="label">Full Headers:</span> <span class="value" style="font-size:11px;word-break:break-all;">${escapeHtml(JSON.stringify(Object.fromEntries(request.headers), null, 2))}</span></div>
-      </div>
-      <div class="note">
-        💡 This request came from your browser. The IP shown above is what Cloudflare sees.<br>
-        🔗 To test with your GTM tag, call: <code>fetch('https://lead.leasinghub.com/test-ip')</code>
-      </div>
-    </body>
-    </html>
-  `, {
-    headers: { 'Content-Type': 'text/html; charset=utf-8' }
-  });
-}
-    // ============================================
-    // 2. 管理后台路由
-    // ============================================
-    if (path === '/admin' && request.method === 'GET') {
-      return handleAdminPage(env);
-    }
-    
-    if (path === '/admin/api/login' && request.method === 'POST') {
-      return handleAdminLogin(request, env);
-    }
-    
-    if (path === '/admin/api/leads' && request.method === 'GET') {
-      return handleAdminGetLeads(request, env);
-    }
-    
-    if (path === '/admin/api/leads/batch-update' && request.method === 'POST') {
-      return handleAdminBatchUpdate(request, env);
-    }
-    
-    if (path === '/admin/api/stats' && request.method === 'GET') {
-      return handleAdminGetStats(env);
-    }
-    
-    if (path === '/admin/api/export' && request.method === 'GET') {
-      return handleAdminExport(request, env);
-    }
-    
     // ============================================
     // 3. 原有的 API 路由（接收 GTM 数据）
     // ============================================
@@ -300,6 +258,11 @@ if (path === '/test-ip' && request.method === 'GET') {
 
     try {
       const data = await request.json();
+      
+      // ============================================
+      // NEW: Capture client information (IP, Country, User-Agent)
+      // ============================================
+      const clientInfo = getClientInfo(request);
       
       const client_id = String(data.client_id || 'unknown');
       const rent = String(data.rent || '');
@@ -432,7 +395,7 @@ if (path === '/test-ip' && request.method === 'GET') {
       }
 
       // ============================================
-      // 2. 写入数据库
+      // 2. 写入数据库 (UPDATED with IP, Country, User-Agent)
       // ============================================
       let leadId = null;
       let dbError = null;
@@ -444,8 +407,9 @@ if (path === '/test-ip' && request.method === 'GET') {
             page_location, page_referrer, landing_page,
             utm_source, utm_medium, utm_campaign, utm_term, utm_content,
             gclid, traffic_type, traffic_source, traffic_detail,
-            search_query, status, utm_id, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            search_query, status, utm_id, created_at,
+            user_ip, user_country, user_agent
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const result = await insertStmt.bind(
@@ -454,11 +418,12 @@ if (path === '/test-ip' && request.method === 'GET') {
           page_location, referrer, landing_page,
           utm_source, utm_medium, utm_campaign, utm_term, utm_content,
           gclid, traffic_type, traffic_source, traffic_detail,
-          search_query, 'pending', utm_id, isoTime
+          search_query, 'pending', utm_id, isoTime,
+          clientInfo.user_ip, clientInfo.user_country, clientInfo.user_agent
         ).run();
 
         leadId = result.meta.last_row_id;
-        console.log(`✅ Lead saved, ID: ${leadId} | Agent: ${agent_display_name}`);
+        console.log(`✅ Lead saved, ID: ${leadId} | Agent: ${agent_display_name} | IP: ${clientInfo.user_ip} | Country: ${clientInfo.user_country}`);
       } catch (error) {
         dbError = error;
         console.error('❌ Database insert error:', error);
@@ -587,6 +552,8 @@ if (path === '/test-ip' && request.method === 'GET') {
         `${formattedTime}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
+        `**IP:** ${clientInfo.user_ip}\n\n` +
+        `**地区:** ${clientInfo.user_country}\n\n` +
         `---\n\n` +
         `${propertyInfo}\n\n` +
         `---\n\n` +
@@ -632,6 +599,8 @@ if (path === '/test-ip' && request.method === 'GET') {
         `${formattedTime}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
+        `**IP:** ${clientInfo.user_ip}\n\n` +
+        `**地区:** ${clientInfo.user_country}\n\n` +
         `**代理:** ${agent_display_name}\n\n` +
         `**代理电话:** ${agent_phone}\n\n` +
         `---\n\n` +
@@ -682,7 +651,9 @@ if (path === '/test-ip' && request.method === 'GET') {
         agent_message_sent: agentSentCount,
         admin_copies_sent: adminSentCount,
         history_count: historyRecords.length,
-        db_error: dbError ? dbError.message : null
+        db_error: dbError ? dbError.message : null,
+        user_ip: clientInfo.user_ip,
+        user_country: clientInfo.user_country
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
