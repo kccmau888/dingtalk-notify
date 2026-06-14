@@ -204,21 +204,53 @@ export default {
     // ============================================
     // 1. 验证页面路由
     // ============================================
-    if (path === '/test-districts' && request.method === 'GET') {
-      const districtsJson = await env.AGENT_PHONE_MAP.get('districts');
-      return new Response(JSON.stringify({ raw: districtsJson, parsed: districtsJson ? JSON.parse(districtsJson) : null }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    if (path === '/verify' && request.method === 'GET') {
-      return handleVerifyPage(env, url, request);
-    }
-    
-    if (path === '/verify' && request.method === 'POST') {
-      return handleVerifyAction(request, env);
-    }
-    
+// In your fetch function, after the existing /test route
+if (path === '/test-ip' && request.method === 'GET') {
+  // Capture all possible IP headers
+  const ip = request.headers.get('CF-Connecting-IP') || 
+             request.headers.get('X-Forwarded-For') || 
+             request.headers.get('X-Real-IP') ||
+             'unknown';
+  
+  const country = request.headers.get('CF-IPCountry') || 'unknown';
+  const city = request.headers.get('CF-IPCity') || 'unknown';
+  const userAgent = request.headers.get('User-Agent') || 'unknown';
+  
+  // Return HTML page with IP info
+  return new Response(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>IP Capture Test</title>
+      <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        h1 { color: #4ec9b0; }
+        .info { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        .label { color: #9cdcfe; font-weight: bold; }
+        .value { color: #4ec9b0; margin-left: 10px; }
+        .note { margin-top: 20px; padding: 10px; background: #2d2d2d; border-left: 3px solid #f48771; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <h1>🌐 IP Capture Test</h1>
+      <div class="info">
+        <div><span class="label">CF-Connecting-IP:</span> <span class="value">${escapeHtml(ip)}</span></div>
+        <div><span class="label">CF-IPCountry:</span> <span class="value">${escapeHtml(country)}</span></div>
+        <div><span class="label">CF-IPCity:</span> <span class="value">${escapeHtml(city)}</span></div>
+        <div><span class="label">User-Agent:</span> <span class="value">${escapeHtml(userAgent)}</span></div>
+        <div><span class="label">Full Headers:</span> <span class="value" style="font-size:11px;word-break:break-all;">${escapeHtml(JSON.stringify(Object.fromEntries(request.headers), null, 2))}</span></div>
+      </div>
+      <div class="note">
+        💡 This request came from your browser. The IP shown above is what Cloudflare sees.<br>
+        🔗 To test with your GTM tag, call: <code>fetch('https://lead.leasinghub.com/test-ip')</code>
+      </div>
+    </body>
+    </html>
+  `, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
     // ============================================
     // 2. 管理后台路由
     // ============================================
