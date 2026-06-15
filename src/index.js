@@ -71,7 +71,7 @@ function getParamFromLandingPage(landing_page, paramName) {
 }
 
 // ============================================
-// NEW: Function to capture client information from request headers
+// Function to capture client information from request headers
 // ============================================
 function getClientInfo(request) {
   return {
@@ -82,6 +82,16 @@ function getClientInfo(request) {
     user_country: request.headers.get('CF-IPCountry') || 'unknown',
     user_agent: request.headers.get('User-Agent') || 'unknown'
   };
+}
+
+// ============================================
+// Function to validate client_id format
+// ============================================
+function isValidClientId(id) {
+  if (!id || id === 'unknown' || id === '') return false;
+  // Pattern: cid_ + 13+ digit timestamp + _ + 8 alphanumeric chars
+  const pattern = /^cid_\d{13,}_[a-z0-9]{8}$/;
+  return pattern.test(id);
 }
 
 async function handleTestMessage(env) {
@@ -204,7 +214,7 @@ export default {
     }
 
     // ============================================
-    // NEW: IP Test Route
+    // IP Test Route
     // ============================================
     if (path === '/test-ip' && request.method === 'GET') {
       const clientInfo = getClientInfo(request);
@@ -260,7 +270,7 @@ export default {
       const data = await request.json();
       
       // ============================================
-      // NEW: Capture client information (IP, Country, User-Agent)
+      // Capture client information (IP, Country, User-Agent)
       // ============================================
       const clientInfo = getClientInfo(request);
       
@@ -274,6 +284,55 @@ export default {
       const click_type = String(data.click_type || '');
       const page_location = String(data.page_location || '');
       const landing_page = String(data.landing_page || '');
+      
+      // ============================================
+      // SERVER-SIDE VALIDATION - Block bot requests
+      // Silent reject - logs to worker console but doesn't save to DB
+      // ============================================
+      
+      let blockReason = null;
+      
+      // Check 1: Missing click_type
+      if (!click_type || click_type === '') {
+        blockReason = 'missing_click_type';
+      }
+      // Check 2: Missing agent
+      else if (!agent_code || agent_code === '') {
+        blockReason = 'missing_agent';
+      }
+      // Check 3: Invalid client_id format
+      else if (!isValidClientId(client_id)) {
+        blockReason = 'invalid_client_id_format';
+      }
+      
+      // If any validation failed, log and silently reject
+      if (blockReason) {
+        // Log to Cloudflare Worker console for analysis
+        console.log(JSON.stringify({
+          type: 'BLOCKED_BOT',
+          reason: blockReason,
+          ip: clientInfo.user_ip,
+          country: clientInfo.user_country,
+          client_id: client_id,
+          click_type: click_type,
+          agent: agent_code,
+          user_agent: clientInfo.user_agent.substring(0, 200),
+          timestamp: new Date().toISOString()
+        }));
+        
+        // Return silent success (bot thinks it worked)
+        return new Response(JSON.stringify({ 
+          success: true,
+          message: 'Lead received'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+      
+      // ============================================
+      // Valid request - continue with normal processing
+      // ============================================
       
       const now = new Date();
       const isoTime = now.toISOString();
