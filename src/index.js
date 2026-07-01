@@ -61,6 +61,41 @@ async function getCachedAccessToken(env) {
   };
 }
 
+// 🔥 NEW: Send message with auto-retry on invalid token
+async function sendDingTalkMessageWithRetry(accessToken, agentId, userIds, title, text, env, retryCount = 0) {
+  const MAX_RETRIES = 2;
+  
+  try {
+    const result = await sendDingTalkMessage(accessToken, agentId, userIds, title, text);
+    
+    // Check if token is invalid (errcode 40014 = invalid access_token)
+    if (result && (result.errcode === 40014 || result.errcode === 40015)) {
+      console.warn(`⚠️ Token invalid (errcode: ${result.errcode}), refreshing...`);
+      
+      // Delete the invalid token from cache
+      await env.AGENT_PHONE_MAP.delete('dingtalk_access_token');
+      
+      if (retryCount < MAX_RETRIES) {
+        // Get new token
+        console.log(`🔄 Retrying with new token (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        const newTokenResult = await getCachedAccessToken(env);
+        const newToken = newTokenResult.token;
+        
+        // Retry with new token
+        return await sendDingTalkMessageWithRetry(newToken, agentId, userIds, title, text, env, retryCount + 1);
+      } else {
+        console.error(`❌ Max retries (${MAX_RETRIES}) exceeded for invalid token`);
+        return result;
+      }
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Send error:', error);
+    throw error;
+  }
+}
+
 async function sendDingTalkMessage(accessToken, agentId, userIds, title, text) {
   if (!userIds || userIds.length === 0) return null;
   
@@ -848,7 +883,7 @@ export default {
       // ============================================
       let agentSentCount = 0;
       if (agent_dingtalk_id) {
-        await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), [agent_dingtalk_id], '📞 新线索通知', messageText);
+        await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), [agent_dingtalk_id], '📞 新线索通知', messageText, env);
         agentSentCount = 1;
         console.log(`✅ Message sent to agent: ${agent_display_name} (${agent_dingtalk_id})`);
       } else {
@@ -895,7 +930,7 @@ export default {
         const adminDingtalkIds = results.map(row => row.dingtalk_id);
         
         if (adminDingtalkIds.length > 0) {
-          const sendResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), adminDingtalkIds, '📋 线索副本', adminMessageText);
+          const sendResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), adminDingtalkIds, '📋 线索副本', adminMessageText, env);
           if (sendResult && sendResult.errcode === 0) {
             adminSentCount = adminDingtalkIds.length;
             console.log(`✅ Message sent to ${adminSentCount} admin(s) (1 API call)`);
