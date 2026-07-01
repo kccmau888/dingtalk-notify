@@ -394,7 +394,18 @@ export default {
     }
 
     // ============================================
-    // 3. 原有的 API 路由（接收 GTM 数据）
+    // 1. 验证页面路由 (ADD THESE BACK!)
+    // ============================================
+    if (path === '/verify' && request.method === 'GET') {
+      return handleVerifyPage(env, url, request);
+    }
+    
+    if (path === '/verify' && request.method === 'POST') {
+      return handleVerifyAction(request, env);
+    }
+
+    // ============================================
+    // 2. 原有的 API 路由（接收 GTM 数据）
     // ============================================
     if (request.method === 'OPTIONS') {
       return new Response(null, {
