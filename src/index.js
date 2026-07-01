@@ -973,7 +973,7 @@ async function handleVerifyPage(env, url, request) {
 <div class="info-row"><span class="info-label">处理代理：</span><span class="info-value">${escapeHtml(noshowRecord.agent_name) || '未知'}</span></div>
 <div class="info-row"><span class="info-label">处理时间：</span><span class="info-value">${new Date(noshowRecord.verified_at).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' })}</span></div></div>
 </div>
-<div class="footer">此线索来自 LeasingHub 系统<br><font color="#6c757d">该客户已被标记为 未有来电 (预约后未出现)</font></div></div>
+<div class="footer">此线索来自 LeasingHub 系统<br><font color="#6c757d">该客户已被标记为 未有来电</font></div></div>
 </body></html>`;
     return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   }
@@ -1042,7 +1042,7 @@ async function handleVerifyPage(env, url, request) {
 <div class="form-group"><label>📋 租 / 买</label><select id="type" onchange="updateBudgetOptions()"><option value="rent" ${lead.rent ? 'selected' : ''}>租用 (Rent)</option><option value="buy" ${lead.property_price ? 'selected' : ''}>购买 (Buy)</option></select></div>
 <div class="form-group"><label>💰 预算范围</label><select id="budgetRange"></select></div>
 <div id="valueDisplay" class="value-display">预计价值: 计算中...</div>
-<div class="button-group"><button type="button" class="btn btn-verify" onclick="submitVerify()">✅ 确认有效</button>${!isRecoveryMode ? '<button type="button" class="btn btn-reject" onclick="submitReject()">🚫 标记 未有来电 / 垃圾</button>' : ''}</div></form></div>
+<div class="button-group"><button type="button" class="btn btn-verify" onclick="submitVerify()">✅ 验证</button></div></form></div>
 <div class="footer">此线索来自 LeasingHub 系统</div></div>
 <script>
   const leadId = ${lead.id};
