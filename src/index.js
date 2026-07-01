@@ -270,85 +270,101 @@ async function handleTestMessage(env) {
     addLog(`📋 request_id: ${requestId}`);
     addLog(`📋 task_id: ${taskId}`);
     
-    // 3. 检查消息投递状态
+    // 3. 🔥 检查每个用户的投递状态
     if (taskId) {
-      addLog(`\n🔄 3. 查询消息投递状态...`);
+      addLog(`\n🔄 3. 查询每个用户的投递状态...`);
       addLog(`⏳ 等待 3 秒让消息处理完成...`);
       await new Promise(resolve => setTimeout(resolve, 3000));
       
-      const statusResult = await checkMessageStatus(accessToken, parseInt(DINGTALK_AGENT_ID), taskId);
+      // 🔥 Check status for each user individually
+      const statusResults = await checkMessageStatusForUsers(accessToken, parseInt(DINGTALK_AGENT_ID), taskId, TEST_USER_IDS);
       
-      addLog(`📋 投递状态响应: ${JSON.stringify(statusResult, null, 2)}`);
+      addLog(`📋 各用户投递状态:`);
+      let deliveredCount = 0;
+      let readCount = 0;
+      let invalidCount = 0;
+      let failedCount = 0;
+      let forbiddenCount = 0;
       
-      if (statusResult.errcode === 0) {
-        addLog(`✅ 状态查询成功！`);
+      for (const result of statusResults) {
+        const userId = result.userId;
+        const data = result.data;
         
-        if (statusResult.send_result) {
-          const sendResult = statusResult.send_result;
-          
-          // 🔥 Check each user's delivery status
-          if (sendResult.invalid_userid_list && sendResult.invalid_userid_list.length > 0) {
-            addLog(`❌ 无效的用户ID: ${sendResult.invalid_userid_list.join(', ')}`, true);
-          }
-          
-          if (sendResult.failed_userid_list && sendResult.failed_userid_list.length > 0) {
-            addLog(`❌ 投递失败的用户: ${sendResult.failed_userid_list.join(', ')}`, true);
-          }
-          
-          if (sendResult.forbidden_userid_list && sendResult.forbidden_userid_list.length > 0) {
-            addLog(`🚫 被限制的用户 (超频控): ${sendResult.forbidden_userid_list.join(', ')}`, true);
-            addLog(`💡 原因: 今天已收过相同内容的消息`, true);
-          }
-          
-          if (sendResult.unread_userid_list && sendResult.unread_userid_list.length > 0) {
-            addLog(`📬 已投递但未读: ${sendResult.unread_userid_list.join(', ')}`);
-          }
-          
-          if (sendResult.read_userid_list && sendResult.read_userid_list.length > 0) {
-            addLog(`✅ 已读: ${sendResult.read_userid_list.join(', ')}`);
-          }
-          
-          // Summary
-          const total = TEST_USER_IDS.length;
-          const success = sendResult.read_userid_list ? sendResult.read_userid_list.length : 0;
-          const unread = sendResult.unread_userid_list ? sendResult.unread_userid_list.length : 0;
-          const failed = sendResult.failed_userid_list ? sendResult.failed_userid_list.length : 0;
-          const forbidden = sendResult.forbidden_userid_list ? sendResult.forbidden_userid_list.length : 0;
-          
-          addLog(`\n📊 投递汇总:`);
-          addLog(`   📬 已投递: ${unread + success}/${total}`);
-          addLog(`   ✅ 已读: ${success}/${total}`);
-          addLog(`   ❌ 失败: ${failed}/${total}`);
-          addLog(`   🚫 被限制: ${forbidden}/${total}`);
+        if (result.error) {
+          addLog(`   ❌ ${userId}: 查询失败 - ${result.error}`, true);
+          continue;
         }
-      } else {
-        addLog(`❌ 状态查询失败: ${statusResult.errmsg} (errcode: ${statusResult.errcode})`, true);
-        addLog(`💡 可能原因: task_id 无效或超过查询时限(24小时)`, true);
+        
+        if (data.errcode !== 0) {
+          addLog(`   ❌ ${userId}: 查询失败 - ${data.errmsg}`, true);
+          continue;
+        }
+        
+        const sendResult = data.send_result || {};
+        let status = '未知';
+        
+        if (sendResult.read_userid_list && sendResult.read_userid_list.length > 0) {
+          status = '✅ 已读';
+          readCount++;
+          deliveredCount++;
+        } else if (sendResult.unread_userid_list && sendResult.unread_userid_list.length > 0) {
+          status = '📬 已投递未读';
+          deliveredCount++;
+        } else if (sendResult.invalid_userid_list && sendResult.invalid_userid_list.length > 0) {
+          status = '❌ 无效用户ID';
+          invalidCount++;
+        } else if (sendResult.failed_userid_list && sendResult.failed_userid_list.length > 0) {
+          status = '❌ 投递失败';
+          failedCount++;
+        } else if (sendResult.forbidden_userid_list && sendResult.forbidden_userid_list.length > 0) {
+          status = '🚫 被限制(频控)';
+          forbiddenCount++;
+        } else {
+          status = '⏳ 处理中...';
+        }
+        
+        addLog(`   ${status}: ${userId}`);
       }
+      
+      // Summary
+      addLog(`\n📊 投递汇总:`);
+      addLog(`   📬 已投递: ${deliveredCount}/${TEST_USER_IDS.length}`);
+      addLog(`   ✅ 已读: ${readCount}/${TEST_USER_IDS.length}`);
+      addLog(`   ❌ 无效: ${invalidCount}/${TEST_USER_IDS.length}`);
+      addLog(`   ❌ 失败: ${failedCount}/${TEST_USER_IDS.length}`);
+      addLog(`   🚫 被限制: ${forbiddenCount}/${TEST_USER_IDS.length}`);
     }
     
   } catch (err) {
     addLog(`❌ 错误: ${err.message}`, true);
   }
   
-  // Helper function to check message status
-  async function checkMessageStatus(accessToken, agentId, taskId) {
+  // 🔥 NEW: Check message status for each user individually
+  async function checkMessageStatusForUsers(accessToken, agentId, taskId, userIds) {
     const url = `https://oapi.dingtalk.com/topapi/message/corpconversation/getsendresult?access_token=${accessToken}`;
     
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agent_id: agentId,
-          task_id: taskId
-        })
-      });
-      
-      return await response.json();
-    } catch (error) {
-      return { errcode: -1, errmsg: `查询失败: ${error.message}` };
+    const results = [];
+    
+    for (const userId of userIds) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent_id: agentId,
+            task_id: taskId,
+            userid: userId  // 🔥 Single user ID
+          })
+        });
+        
+        const data = await response.json();
+        results.push({ userId, data });
+      } catch (error) {
+        results.push({ userId, error: error.message });
+      }
     }
+    
+    return results;
   }
   
   // 返回 HTML 页面显示日志
@@ -388,7 +404,7 @@ async function handleTestMessage(env) {
       <h1>🧪 钉钉批量消息测试</h1>
       <p>目标用户 (${TEST_USER_IDS.length} 个):</p>
       <ul>
-        ${TEST_USER_IDS.map(id => `<li><code style="background:#2d2d2d;padding:2px 8px;border-radius:4px">${id}</code></li>`).join('')}
+        ${TEST_USER_IDS.map(id => `<li><code style="background:#2d2d2d;padding:2px 8px;border-radius:4px">${escapeHtml(id)}</code></li>`).join('')}
       </ul>
       
       <div class="log">
