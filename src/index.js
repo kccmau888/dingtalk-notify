@@ -854,9 +854,9 @@ export default {
     const path = url.pathname;
     
     // Test route (uncomment when needed)
-     if (path === '/test' && request.method === 'GET') {
-       return handleTestMessage(env);
-     }
+    // if (path === '/test' && request.method === 'GET') {
+    //   return handleTestMessage(env);
+    // }
 
     // IP Test Route
     if (path === '/test-ip' && request.method === 'GET') {
