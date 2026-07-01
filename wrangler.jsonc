@@ -25,5 +25,11 @@
       "binding": "AGENT_PHONE_MAP",
       "id": "a619c74306f042f9a4212c7bef4137db"
     }
-  ]
+  ],
+  "vars": {
+    "DINGTALK_APP_KEY": "dingtnf4e3maugzlzvsi",
+    "DINGTALK_APP_SECRET": "dDjy-olL3qWswa3d0g4H_psKjuDOBNCATnYYQjVMVU6_-TFjTP1ImZYPBjD4VO5i",
+    "DINGTALK_AGENT_ID": "4616256476",
+    "DEFAULT_HOTLINE": "+85291333030"
+  }
 }
