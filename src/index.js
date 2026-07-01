@@ -137,7 +137,7 @@ async function handleTestMessage(env) {
   const DINGTALK_APP_KEY = env.DINGTALK_APP_KEY;
   const DINGTALK_APP_SECRET = env.DINGTALK_APP_SECRET;
   const DINGTALK_AGENT_ID = env.DINGTALK_AGENT_ID;
-  const TEST_USER_ID = "w1w_9rjhy12t6";
+  const TEST_USER_ID = "80o_plm0pu17n";
   
   let logs = [];
   let requestId = null;
