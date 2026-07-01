@@ -132,7 +132,6 @@ function calculateValue(type, range, baseRent, basePrice) {
     }
   }
 }
-
 async function handleTestMessage(env) {
   const DINGTALK_APP_KEY = env.DINGTALK_APP_KEY;
   const DINGTALK_APP_SECRET = env.DINGTALK_APP_SECRET;
