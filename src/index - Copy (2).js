@@ -891,7 +891,7 @@ export default {
 };
 
 // ============================================
-// MODIFIED: handleVerifyPage with value-based status (Simplified)
+// MODIFIED: handleVerifyPage with 未有来电 support
 // ============================================
 
 async function handleVerifyPage(env, url, request) {
@@ -916,25 +916,31 @@ async function handleVerifyPage(env, url, request) {
   const mode = url.searchParams.get('mode');
   const isRecoveryMode = (mode === 'recovery');
   
-  // Check for verified leads (value > 1)
   const verifiedRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
-    WHERE client_id = ? AND value > 1
+    WHERE client_id = ? AND status = 'verified' AND value > 1
     ORDER BY verified_at DESC
     LIMIT 1
   `).bind(lead.client_id).first();
   
-  // Check for rejected or noshow leads (value = 0 OR value = 1)
-  const rejectedOrNoshowRecord = await env.lead_db.prepare(`
+  const rejectedRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
-    WHERE client_id = ? AND (value = 0 OR value = 1)
+    WHERE client_id = ? AND (status = 'rejected' OR value = 1)
     ORDER BY verified_at DESC
     LIMIT 1
   `).bind(lead.client_id).first();
   
-  // If verified (value > 1), show locked page
+  // Check if there's a 未有来电 record
+  const noshowRecord = await env.lead_db.prepare(`
+    SELECT id, agent_name, verified_by, verified_at, status, value
+    FROM leads 
+    WHERE client_id = ? AND value = 1
+    ORDER BY verified_at DESC
+    LIMIT 1
+  `).bind(lead.client_id).first();
+  
   if (verifiedRecord) {
     const html = `<!DOCTYPE html>
 <html lang="zh-HK">
@@ -953,10 +959,28 @@ async function handleVerifyPage(env, url, request) {
     return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   }
   
-  // Show recovery page for rejected OR noshow (value = 0 OR value = 1)
-  if (isRecoveryMode && rejectedOrNoshowRecord) {
+  // Check if 未有来电 exists (value = 1)
+  if (noshowRecord && !isRecoveryMode) {
+    const html = `<!DOCTYPE html>
+<html lang="zh-HK">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>线索验证 - 未有来电</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:20px;display:flex;justify-content:center;align-items:center}.container{max-width:500px;margin:0 auto;background:white;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden}.header{background:linear-gradient(135deg,#6c757d,#495057);color:white;padding:30px;text-align:center}.header h1{font-size:24px;margin-bottom:8px}.content{padding:30px}.warning-icon{font-size:60px;text-align:center;margin-bottom:20px}.warning-message{background:#e9ecef;border-left:4px solid #6c757d;padding:16px;border-radius:8px;margin-bottom:20px}.info-row{padding:8px 0;border-bottom:1px solid #e9ecef}.info-label{font-weight:600;color:#495057;display:inline-block;width:100px}.info-value{color:#212529}.footer{background:#f8f9fa;padding:16px 30px;text-align:center;font-size:12px;color:#6c757d}</style>
+</head>
+<body>
+<div class="container"><div class="header"><h1>🚫 线索验证 - 未有来电</h1></div>
+<div class="content"><div class="warning-icon">🚫</div>
+<div class="warning-message"><strong>此客户已被标记为 未有来电！</strong><br><br>
+<div class="info-row"><span class="info-label">处理代理：</span><span class="info-value">${escapeHtml(noshowRecord.agent_name) || '未知'}</span></div>
+<div class="info-row"><span class="info-label">处理时间：</span><span class="info-value">${new Date(noshowRecord.verified_at).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' })}</span></div></div>
+</div>
+<div class="footer">此线索来自 LeasingHub 系统<br><font color="#6c757d">该客户已被标记为 未有来电</font></div></div>
+</body></html>`;
+    return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  }
+  
+  if (isRecoveryMode && rejectedRecord) {
     // 继续往下执行
-  } else if (rejectedOrNoshowRecord && !isRecoveryMode) {
+  } else if (rejectedRecord && !isRecoveryMode) {
     const html = `<!DOCTYPE html>
 <html lang="zh-HK">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>线索验证 - 可恢复</title>
@@ -965,10 +989,10 @@ async function handleVerifyPage(env, url, request) {
 <body>
 <div class="container"><div class="header"><h1>🔍 线索验证</h1></div>
 <div class="content"><div class="warning-icon">⚠️</div>
-<div class="warning-message"><strong>此线索曾被标记为无效！</strong><br><br>
-<div class="info-row"><span class="info-label">原处理代理：</span><span class="info-value">${escapeHtml(rejectedOrNoshowRecord.agent_name) || '未知'}</span></div>
-<div class="info-row"><span class="info-label">原处理时间：</span><span class="info-value">${new Date(rejectedOrNoshowRecord.verified_at).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' })}</span></div></div>
-<p style="margin-bottom:20px;color:#666;">该线索曾被标记为无效，如需重新确认，请点击下方按钮继续。</p>
+<div class="warning-message"><strong>此线索曾被标记为垃圾线索！</strong><br><br>
+<div class="info-row"><span class="info-label">原处理代理：</span><span class="info-value">${escapeHtml(rejectedRecord.agent_name) || '未知'}</span></div>
+<div class="info-row"><span class="info-label">原处理时间：</span><span class="info-value">${new Date(rejectedRecord.verified_at).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' })}</span></div></div>
+<p style="margin-bottom:20px;color:#666;">该线索曾被标记为垃圾/未有来电或讯息，如需重新确认，请点击下方按钮继续。</p>
 <div class="button-group"><a href="/verify?id=${leadId}&mode=recovery" class="btn btn-verify" style="text-decoration:none;text-align:center;display:inline-block;">✅ 继续验证此线索</a></div></div>
 <div class="footer">此线索来自 LeasingHub 系统</div></div>
 </body></html>`;
@@ -981,7 +1005,7 @@ async function handleVerifyPage(env, url, request) {
     try { districts = JSON.parse(districtsJson); } catch (e) {}
   }
   
-  // Rent and Buy options (keep as is)
+  // MODIFIED: Added 未有来电 and Reject options to rentOptions and buyOptions
   const rentOptions = [
     { value: '0', label: '0 (拒绝/垃圾)', baseValue: 0 },
     { value: '1', label: '未有来电', baseValue: 1 },
@@ -1006,13 +1030,13 @@ async function handleVerifyPage(env, url, request) {
   const html = `<!DOCTYPE html>
 <html lang="zh-HK">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>线索验证 - LeasingHub</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:20px}.container{max-width:600px;margin:0 auto;background:white;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden}.header{background:linear-gradient(135deg,#da196e,#b9155e);color:white;padding:30px;text-align:center}.header h1{font-size:24px;margin-bottom:8px}.header p{opacity:0.9;font-size:14px}.content{padding:30px}.info-section{background:#f8f9fa;border-radius:12px;padding:20px;margin-bottom:24px}.info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e9ecef}.info-row:last-child{border-bottom:none}.info-label{font-weight:600;color:#495057;width:120px}.info-value{color:#212529;flex:1;word-break:break-word}.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}.status-pending{background:#ffc107;color:#856404}.form-group{margin-bottom:20px}.form-group label{display:block;font-weight:600;color:#495057;margin-bottom:8px}.form-group select{width:100%;padding:12px;border:1px solid #ced4da;border-radius:8px;font-size:16px;background:white}.button-group{display:flex;gap:16px;margin-top:24px}.btn{flex:1;padding:14px 20px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;transition:transform 0.2s,opacity 0.2s}.btn:hover{transform:translateY(-2px);opacity:0.9}.btn-verify{background:#28a745;color:white}.btn-reject{background:#dc3545;color:white}.btn-cancel{background:#6c757d;color:white}.footer{background:#f8f9fa;padding:16px 30px;text-align:center;font-size:12px;color:#6c757d}.message{padding:12px 16px;border-radius:8px;margin-bottom:20px;display:none}.message.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}.message.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}.value-display{background:#e9ecef;padding:12px;border-radius:8px;margin-top:16px;text-align:center;font-size:18px;font-weight:bold;color:#da196e}@media (max-width:480px){.info-row{flex-direction:column}.info-label{width:100%;margin-bottom:4px}.button-group{flex-direction:column}}</style>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;padding:20px}.container{max-width:600px;margin:0 auto;background:white;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden}.header{background:linear-gradient(135deg,#da196e,#b9155e);color:white;padding:30px;text-align:center}.header h1{font-size:24px;margin-bottom:8px}.header p{opacity:0.9;font-size:14px}.content{padding:30px}.info-section{background:#f8f9fa;border-radius:12px;padding:20px;margin-bottom:24px}.info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e9ecef}.info-row:last-child{border-bottom:none}.info-label{font-weight:600;color:#495057;width:120px}.info-value{color:#212529;flex:1;word-break:break-word}.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}.status-pending{background:#ffc107;color:#856404}.status-noshow{background:#6c757d;color:white}.form-group{margin-bottom:20px}.form-group label{display:block;font-weight:600;color:#495057;margin-bottom:8px}.form-group select{width:100%;padding:12px;border:1px solid #ced4da;border-radius:8px;font-size:16px;background:white}.button-group{display:flex;gap:16px;margin-top:24px}.btn{flex:1;padding:14px 20px;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;transition:transform 0.2s,opacity 0.2s}.btn:hover{transform:translateY(-2px);opacity:0.9}.btn-verify{background:#28a745;color:white}.btn-reject{background:#dc3545;color:white}.btn-cancel{background:#6c757d;color:white}.footer{background:#f8f9fa;padding:16px 30px;text-align:center;font-size:12px;color:#6c757d}.message{padding:12px 16px;border-radius:8px;margin-bottom:20px;display:none}.message.success{background:#d4edda;color:#155724;border:1px solid #c3e6cb}.message.error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}.value-display{background:#e9ecef;padding:12px;border-radius:8px;margin-top:16px;text-align:center;font-size:18px;font-weight:bold;color:#da196e}@media (max-width:480px){.info-row{flex-direction:column}.info-label{width:100%;margin-bottom:4px}.button-group{flex-direction:column}}</style>
 </head>
-<body><div class="container"><div class="header"><h1>🔍 线索验证</h1><p id="headerSubtitle">${isRecoveryMode ? '⚠️ 此线索曾被标记为无效，请重新确认客户需求' : '请确认客户咨询信息并设置价值'}</p></div>
+<body><div class="container"><div class="header"><h1>🔍 线索验证</h1><p id="headerSubtitle">${isRecoveryMode ? '⚠️ 此线索曾被标记为垃圾，请重新确认客户需求' : '请确认客户咨询信息并设置价值'}</p></div>
 <div class="content"><div id="message" class="message"></div>
 <div class="info-section"><div class="info-row"><span class="info-label">线索ID：</span><span class="info-value">#${lead.id}</span></div>
 <div class="info-row"><span class="info-label">客号：</span><span class="info-value">${escapeHtml(lead.client_id)}</span></div>
-<div class="info-row"><span class="info-label">状态：</span><span class="info-value"><span class="status-badge status-pending">${isRecoveryMode ? '待重新确认' : '⏳ 待处理'}</span></span></div></div>
+<div class="info-row"><span class="info-label">状态：</span><span class="info-value"><span class="status-badge ${isRecoveryMode ? 'status-pending' : 'status-pending'}">${isRecoveryMode ? '待重新确认' : '⏳ 待处理'}</span></span></div></div>
 <form id="verifyForm"><input type="hidden" id="agentName" value="${escapeHtml(lead.agent_name) || 'unknown'}">
 <div class="form-group"><label>📍 区域</label><select id="district">${districts.map(d => `<option value="${escapeHtml(d)}" ${lead.district === d ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('')}</select></div>
 <div class="form-group"><label>📋 租 / 买</label><select id="type" onchange="updateBudgetOptions()"><option value="rent" ${lead.rent ? 'selected' : ''}>租用 (Rent)</option><option value="buy" ${lead.property_price ? 'selected' : ''}>购买 (Buy)</option></select></div>
@@ -1030,6 +1054,7 @@ async function handleVerifyPage(env, url, request) {
     return document.getElementById('agentName').value;
   }
   
+  // MODIFIED: Added 未有来电 and Reject options
   const rentOptions = ${JSON.stringify(rentOptions)};
   const buyOptions = ${JSON.stringify(buyOptions)};
   
@@ -1054,6 +1079,7 @@ async function handleVerifyPage(env, url, request) {
     setDefaultBudgetRange();
   }
   
+  // MODIFIED: calculateValue with 未有来电 and Reject support
   function calculateValue() {
     const type = document.getElementById('type').value;
     const range = document.getElementById('budgetRange').value;
@@ -1162,65 +1188,142 @@ async function handleVerifyPage(env, url, request) {
     document.getElementById('budgetRange').addEventListener('change', calculateValue);
   });
 
-  async function submitVerify() {
-    const district = document.getElementById('district').value;
-    const type = document.getElementById('type').value;
-    const budgetRange = document.getElementById('budgetRange').value;
-    const value = calculateValue();
-    const agentName = getAgentName();
-    const messageDiv = document.getElementById('message');
-    const submitBtn = event.target;
-    const form = document.getElementById('verifyForm');
-    const headerSubtitle = document.getElementById('headerSubtitle');
-    const infoSection = document.querySelector('.info-section');
-    
-    submitBtn.disabled = true;
-    submitBtn.textContent = '处理中...';
-    
-    if (headerSubtitle) headerSubtitle.style.display = 'none';
-    if (infoSection) infoSection.style.display = 'none';
+async function submitVerify() {
+  const statusType = isRecoveryMode ? 'reinstated' : 'verified';
+  const district = document.getElementById('district').value;
+  const type = document.getElementById('type').value;
+  const budgetRange = document.getElementById('budgetRange').value;
+  const value = calculateValue();
+  const agentName = getAgentName();
+  const messageDiv = document.getElementById('message');
+  const submitBtn = event.target;
+  const form = document.getElementById('verifyForm');
+  const headerSubtitle = document.getElementById('headerSubtitle');
+  const infoSection = document.querySelector('.info-section');
+  
+  submitBtn.disabled = true;
+  submitBtn.textContent = '处理中...';
+  
+  if (headerSubtitle) headerSubtitle.style.display = 'none';
+  if (infoSection) infoSection.style.display = 'none';
 
-    try {
-      const response = await fetch('/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: leadId,
-          district: district,
-          transaction_type: type,
-          budget_range: budgetRange,
-          value: value,
-          verified_by: agentName,
-          is_recovery: isRecoveryMode
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        if (form) form.style.display = 'none';
-        messageDiv.className = 'message success';
-        messageDiv.style.display = 'block';
-        messageDiv.innerHTML = '<strong>✅ 确认成功！</strong><br>价值已记录。<br>请手动关闭此页面。';
-        
-        window.history.replaceState(null, '', window.location.pathname + '?id=' + leadId + '&processed=1');
-      } else {
-        throw new Error(result.error || '操作失败');
-      }
-    } catch (error) {
-      messageDiv.className = 'message error';
+  try {
+    const response = await fetch('/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: leadId,
+        status: statusType,
+        district: district,
+        transaction_type: type,
+        budget_range: budgetRange,
+        value: value,
+        verified_by: agentName
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      if (form) form.style.display = 'none';
+      messageDiv.className = 'message success';
       messageDiv.style.display = 'block';
-      messageDiv.innerText = '操作失败：' + error.message;
-      submitBtn.disabled = false;
-      submitBtn.textContent = '✅ 验证';
-      if (headerSubtitle) headerSubtitle.style.display = 'block';
-      if (infoSection) infoSection.style.display = 'block';
+      messageDiv.innerHTML = '<strong>✅ 确认成功！</strong><br>价值已记录。<br>请手动关闭此页面。';
+      
+      window.history.replaceState(null, '', window.location.pathname + '?id=' + leadId + '&processed=1');
+    } else {
+      throw new Error(result.error || '操作失败');
     }
+  } catch (error) {
+    messageDiv.className = 'message error';
+    messageDiv.style.display = 'block';
+    messageDiv.innerText = '操作失败：' + error.message;
+    submitBtn.disabled = false;
+    submitBtn.textContent = '✅ 确认有效';
+    if (headerSubtitle) headerSubtitle.style.display = 'block';
+    if (infoSection) infoSection.style.display = 'block';
   }
+}
+
+// MODIFIED: submitReject with 未有来电 support
+async function submitReject() {
+  if (isRecoveryMode) return;
+  const agentName = getAgentName();
+  const messageDiv = document.getElementById('message');
+  const submitBtn = event.target;
+  const form = document.getElementById('verifyForm');
+  const headerSubtitle = document.getElementById('headerSubtitle');
+  const infoSection = document.querySelector('.info-section');
+  
+  // Check if 未有来电 is selected
+  const budgetRange = document.getElementById('budgetRange').value;
+  const isNoShow = (budgetRange === '1');
+  
+  submitBtn.disabled = true;
+  submitBtn.textContent = '处理中...';
+  
+  if (headerSubtitle) headerSubtitle.style.display = 'none';
+  if (infoSection) infoSection.style.display = 'none';
+  
+  try {
+    const response = await fetch('/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: leadId,
+        status: isNoShow ? 'verified' : 'rejected',
+        value: isNoShow ? 1 : 0,
+        budget_range: isNoShow ? '1' : '0',
+        verified_by: agentName
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      if (form) form.style.display = 'none';
+      messageDiv.className = 'message success';
+      messageDiv.style.display = 'block';
+      if (isNoShow) {
+        messageDiv.innerHTML = '<strong>🚫 已标记为 未有来电</strong><br>客户预约后未出现。<br>请手动关闭此页面。';
+      } else {
+        messageDiv.innerHTML = '<strong>❌ 已标记为垃圾线索</strong><br>请手动关闭此页面。';
+      }
+    } else {
+      throw new Error(result.error || '操作失败');
+    }
+  } catch (error) {
+    messageDiv.className = 'message error';
+    messageDiv.style.display = 'block';
+    messageDiv.innerText = '操作失败：' + error.message;
+    submitBtn.disabled = false;
+    submitBtn.textContent = isNoShow ? '🚫 标记 未有来电' : '❌ 确认垃圾';
+    if (headerSubtitle) headerSubtitle.style.display = 'block';
+    if (infoSection) infoSection.style.display = 'block';
+  }
+}
+
+function cancelAction() {
+  const form = document.getElementById('verifyForm');
+  const messageDiv = document.getElementById('message');
+  const headerSubtitle = document.getElementById('headerSubtitle');
+  const infoSection = document.querySelector('.info-section');
+  
+  if (form) form.style.display = 'none';
+  if (infoSection) infoSection.style.display = 'none';
+  if (headerSubtitle) headerSubtitle.style.display = 'none';
+  messageDiv.style.display = 'block';
+  messageDiv.style.background = '#e9ecef';
+  messageDiv.style.color = '#6c757d';
+  messageDiv.style.border = '1px solid #ced4da';
+  messageDiv.innerHTML = '<strong>已取消</strong><br>请手动关闭此页面。';
+}
 
   window.updateBudgetOptions = updateBudgetOptions;
   window.calculateValue = calculateValue;
   window.submitVerify = submitVerify;
+  window.submitReject = submitReject;
+  window.cancelAction = cancelAction;
 </script>
 </body>
 </html>`;
@@ -1229,14 +1332,15 @@ async function handleVerifyPage(env, url, request) {
 }
 
 // ============================================
-// MODIFIED: handleVerifyAction with value-based status (Simplified)
+// MODIFIED: handleVerifyAction with 未有来电 support
 // ============================================
 
 async function handleVerifyAction(request, env) {
   try {
-    const { id, district, transaction_type, budget_range, value, verified_by, is_recovery } = await request.json();
+    const { id, status, district, transaction_type, budget_range, value, verified_by } = await request.json();
     
-    if (!id) {
+    // ADDED: 'noshow' as valid status
+    if (!id || (!['verified', 'rejected', 'reinstated', 'noshow'].includes(status))) {
       return new Response(JSON.stringify({ error: '参数错误' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
@@ -1246,34 +1350,37 @@ async function handleVerifyAction(request, env) {
     const now = new Date().toISOString();
     const verifiedBy = verified_by || 'system';
     
-    let finalValue = value;
+    let result;
     
-    // If in recovery mode, convert 0 or 1 to a valid verified value
-    if (is_recovery) {
-      if (value === 0 || value === 1) {
-        finalValue = 2000;  // Default verified value
-      } else {
-        finalValue = value;
-      }
-    }
-    
-    // Determine status based on final value
-    let status;
-    if (finalValue === 0) {
-      status = 'rejected';
-    } else if (finalValue === 1) {
-      status = 'verified';  // Noshow
+    // ADDED: Handle 未有来电 as verified with value=1
+    if (status === 'verified' || status === 'noshow') {
+      const actualStatus = (status === 'noshow') ? 'verified' : status;
+      const actualValue = (status === 'noshow') ? 1 : value;
+      const actualBudget = (status === 'noshow') ? '1' : budget_range;
+      
+      result = await env.lead_db.prepare(`
+        UPDATE leads 
+        SET status = ?, verified_at = ?, verified_by = ?,
+            district = ?, transaction_type = ?, budget_range = ?, value = ?
+        WHERE id = ?
+      `).bind(actualStatus, now, verifiedBy, district, transaction_type, actualBudget, actualValue, id).run();
+      
+    } else if (status === 'rejected') {
+      result = await env.lead_db.prepare(`
+        UPDATE leads 
+        SET status = ?, verified_at = ?, verified_by = ?, value = ?, budget_range = ?
+        WHERE id = ?
+      `).bind(status, now, verifiedBy, 0, '0', id).run();
+      
     } else {
-      status = 'verified';  // Verified (value > 1)
+      // reinstated
+      result = await env.lead_db.prepare(`
+        UPDATE leads 
+        SET status = 'verified', verified_at = ?, verified_by = ?,
+            district = ?, transaction_type = ?, budget_range = ?, value = ?
+        WHERE id = ?
+      `).bind(now, verifiedBy, district, transaction_type, budget_range, value, id).run();
     }
-    
-    // Update the lead
-    const result = await env.lead_db.prepare(`
-      UPDATE leads 
-      SET status = ?, verified_at = ?, verified_by = ?,
-          district = ?, transaction_type = ?, budget_range = ?, value = ?
-      WHERE id = ?
-    `).bind(status, now, verifiedBy, district, transaction_type, budget_range, finalValue, id).run();
     
     if (result.meta.rows_written === 0) {
       return new Response(JSON.stringify({ error: '线索不存在' }), {
