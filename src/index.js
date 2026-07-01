@@ -207,8 +207,8 @@ async function handleTestMessage(env) {
   
   // 🔥 TWO test users for batch send
   const TEST_USER_IDS = [
-    "235618443822-2024983294",  // Kevin Mau
-    "0114073525261965110067"    // Sam Chan
+    "235618443822-2024983294"  // Kevin Mau
+    //"0114073525261965110067"    // Sam Chan
   ];
   
   let logs = [];
