@@ -1,6 +1,7 @@
 // ============================================
-// Initial First Deployment (MODIFIED - Added 未有来电 support)
+// TOKEN MANAGEMENT
 // ============================================
+
 async function getCachedAccessToken(env) {
   const cached = await env.AGENT_PHONE_MAP.get('dingtalk_access_token');
   
@@ -61,77 +62,67 @@ async function getCachedAccessToken(env) {
   };
 }
 
-// 🔥 NEW: Send message with auto-retry on invalid token
-async function sendDingTalkMessageWithRetry(accessToken, agentId, userIds, title, text, env, retryCount = 0) {
+// ============================================
+// MESSAGE SENDING (Unified with auto-retry)
+// ============================================
+
+async function sendDingTalkMessage(accessToken, agentId, userIds, title, text, env, retryCount = 0) {
+  if (!userIds || userIds.length === 0) return null;
+  
   const MAX_RETRIES = 2;
+  const useridList = userIds.join('|');
   
   try {
-    const result = await sendDingTalkMessage(accessToken, agentId, userIds, title, text);
+    const sendRes = await fetch(`https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${accessToken}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: agentId,
+        userid_list: useridList,
+        msg: {
+          msgtype: 'markdown',
+          markdown: {
+            title: title,
+            text: text
+          }
+        }
+      })
+    });
     
-    // Check if token is invalid (errcode 40014 = invalid access_token)
-    if (result && (result.errcode === 40014 || result.errcode === 40015)) {
-      console.warn(`⚠️ Token invalid (errcode: ${result.errcode}), refreshing...`);
+    const sendData = await sendRes.json();
+    
+    // Check if token is invalid
+    if (sendData.errcode === 40014 || sendData.errcode === 40015) {
+      console.warn(`⚠️ Token invalid (errcode: ${sendData.errcode}), refreshing...`);
       
-      // Delete the invalid token from cache
+      // Delete invalid token from cache
       await env.AGENT_PHONE_MAP.delete('dingtalk_access_token');
       
       if (retryCount < MAX_RETRIES) {
-        // Get new token
         console.log(`🔄 Retrying with new token (attempt ${retryCount + 1}/${MAX_RETRIES})`);
         const newTokenResult = await getCachedAccessToken(env);
-        const newToken = newTokenResult.token;
-        
         // Retry with new token
-        return await sendDingTalkMessageWithRetry(newToken, agentId, userIds, title, text, env, retryCount + 1);
+        return await sendDingTalkMessage(newTokenResult.token, agentId, userIds, title, text, env, retryCount + 1);
       } else {
         console.error(`❌ Max retries (${MAX_RETRIES}) exceeded for invalid token`);
-        return result;
+        return sendData;
       }
     }
     
-    return result;
+    if (sendData.errcode !== 0) {
+      console.error(`Send error: ${sendData.errmsg} (errcode: ${sendData.errcode})`);
+    }
+    return sendData;
+    
   } catch (error) {
     console.error('Send error:', error);
     throw error;
   }
 }
 
-async function sendDingTalkMessage(accessToken, agentId, userIds, title, text) {
-  if (!userIds || userIds.length === 0) return null;
-  
-  const useridList = userIds.join('|');
-  const sendRes = await fetch(`https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${accessToken}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      agent_id: agentId,
-      userid_list: useridList,
-      msg: {
-        msgtype: 'markdown',
-        markdown: {
-          title: title,
-          text: text
-        }
-      }
-    })
-  });
-  
-  const sendData = await sendRes.json();
-  
-  // 🔥 Check if token is invalid
-  if (sendData.errcode === 40014 || sendData.errcode === 40015) {
-    console.warn('⚠️ Token invalid, clearing cache...');
-    // Clear the invalid token from KV
-    await env.AGENT_PHONE_MAP.delete('dingtalk_access_token');
-    // The next call will fetch a new token automatically
-    return null;
-  }
-  
-  if (sendData.errcode !== 0) {
-    console.error(`Send error: ${sendData.errmsg} (errcode: ${sendData.errcode})`);
-  }
-  return sendData;
-}
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 
 function getParamFromLandingPage(landing_page, paramName) {
   if (!landing_page || typeof landing_page !== 'string') return '';
@@ -144,9 +135,6 @@ function getParamFromLandingPage(landing_page, paramName) {
   }
 }
 
-// ============================================
-// Function to capture client information from request headers
-// ============================================
 function getClientInfo(request) {
   return {
     user_ip: request.headers.get('CF-Connecting-IP') || 
@@ -158,19 +146,12 @@ function getClientInfo(request) {
   };
 }
 
-// ============================================
-// Function to validate client_id format
-// ============================================
 function isValidClientId(id) {
   if (!id || id === 'unknown' || id === '') return false;
-  // Pattern: cid_ + 13+ digit timestamp + _ + 8 alphanumeric chars
   const pattern = /^cid_\d{13,}_[a-z0-9]{8}$/;
   return pattern.test(id);
 }
 
-// ============================================
-// MODIFIED: calculateValue with 未有来电 support
-// ============================================
 function calculateValue(type, range, baseRent, basePrice) {
   const extractNumber = (str) => {
     if (!str) return 0;
@@ -181,7 +162,6 @@ function calculateValue(type, range, baseRent, basePrice) {
   const rentNum = extractNumber(baseRent);
   const priceNum = extractNumber(basePrice);
   
-  // ADDED: 未有来电 and Reject support
   if (range === '0') return 0;
   if (range === '1') return 1;
   
@@ -206,6 +186,21 @@ function calculateValue(type, range, baseRent, basePrice) {
     }
   }
 }
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>]/g, function(m) {
+    if (m === '&') return '&amp;';
+    if (m === '<') return '&lt;';
+    if (m === '>') return '&gt;';
+    return m;
+  });
+}
+
+// ============================================
+// TEST MESSAGE HANDLER
+// ============================================
+
 async function handleTestMessage(env) {
   const DINGTALK_APP_KEY = env.DINGTALK_APP_KEY;
   const DINGTALK_APP_SECRET = env.DINGTALK_APP_SECRET;
@@ -223,7 +218,6 @@ async function handleTestMessage(env) {
   }
   
   try {
-    // 1. 获取 token
     addLog('🔄 1. 获取 Access Token...');
     const tokenUrl = `https://oapi.dingtalk.com/gettoken?appkey=${DINGTALK_APP_KEY}&appsecret=${DINGTALK_APP_SECRET}`;
     const tokenRes = await fetch(tokenUrl);
@@ -235,7 +229,6 @@ async function handleTestMessage(env) {
     const accessToken = tokenData.access_token;
     addLog(`✅ Token 获取成功: ${accessToken.substring(0, 20)}...`);
     
-    // 2. 发送消息
     addLog(`🔄 2. 发送消息给 ${TEST_USER_ID}...`);
     const sendUrl = `https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${accessToken}`;
     const sendRes = await fetch(sendUrl, {
@@ -267,7 +260,6 @@ async function handleTestMessage(env) {
     addLog(`📋 request_id: ${requestId}`);
     addLog(`📋 task_id: ${taskId}`);
     
-    // 3. 检查消息投递状态 (Wait a moment for processing)
     if (taskId) {
       addLog(`\n🔄 3. 查询消息投递状态...`);
       addLog(`⏳ 等待 3 秒让消息处理完成...`);
@@ -280,11 +272,9 @@ async function handleTestMessage(env) {
       if (statusResult.errcode === 0) {
         addLog(`✅ 状态查询成功！`);
         
-        // Parse and display delivery status
         if (statusResult.send_result) {
           const sendResult = statusResult.send_result;
           
-          // Check if there's a failed list
           if (sendResult.failed_userid_list && sendResult.failed_userid_list.length > 0) {
             addLog(`❌ 投递失败的用户: ${sendResult.failed_userid_list.join(', ')}`, true);
             addLog(`💡 可能原因: 用户不在应用可见范围内`, true);
@@ -292,13 +282,11 @@ async function handleTestMessage(env) {
             addLog(`✅ 消息成功投递到: ${sendResult.success_userid_list.join(', ')}`);
           }
           
-          // Check for invalid users
           if (sendResult.invalid_userid_list && sendResult.invalid_userid_list.length > 0) {
             addLog(`⚠️ 无效的用户ID: ${sendResult.invalid_userid_list.join(', ')}`, true);
             addLog(`💡 请检查用户ID是否正确`, true);
           }
           
-          // Show send progress
           if (sendResult.send_progress !== undefined) {
             addLog(`📊 发送进度: ${sendResult.send_progress}%`);
           }
@@ -313,7 +301,6 @@ async function handleTestMessage(env) {
     addLog(`❌ 错误: ${err.message}`, true);
   }
   
-  // Helper function to check message status
   async function checkMessageStatus(accessToken, agentId, taskId) {
     const url = `https://oapi.dingtalk.com/topapi/message/corpconversation/getsendresult?access_token=${accessToken}`;
     
@@ -333,7 +320,6 @@ async function handleTestMessage(env) {
     }
   }
   
-  // 返回 HTML 页面显示日志
   return new Response(`
     <!DOCTYPE html>
     <html>
@@ -410,566 +396,8 @@ async function handleTestMessage(env) {
   });
 }
 
-// Helper function for HTML escaping
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/[&<>]/g, function(m) {
-    if (m === '&') return '&amp;';
-    if (m === '<') return '&lt;';
-    if (m === '>') return '&gt;';
-    return m;
-  });
-}
-
-// 在你的 fetch 函数中，放在最开头（其他路由之前）
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    
-    // ============================================
-    // 测试路由 - 访问 lead.leasinghub.com/test
-    // ============================================
-    if (path === '/test' && request.method === 'GET') {
-      return handleTestMessage(env);
-    }
-
-    // ============================================
-    // IP Test Route
-    // ============================================
-    if (path === '/test-ip' && request.method === 'GET') {
-      const clientInfo = getClientInfo(request);
-      return new Response(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>IP Capture Test</title>
-          <style>
-            body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
-            h1 { color: #4ec9b0; }
-            .info { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-top: 20px; }
-            .label { color: #9cdcfe; font-weight: bold; }
-            .value { color: #4ec9b0; margin-left: 10px; }
-          </style>
-        </head>
-        <body>
-          <h1>🌐 IP Capture Test</h1>
-          <div class="info">
-            <div><span class="label">User IP:</span> <span class="value">${escapeHtml(clientInfo.user_ip)}</span></div>
-            <div><span class="label">Country:</span> <span class="value">${escapeHtml(clientInfo.user_country)}</span></div>
-            <div><span class="label">User Agent:</span> <span class="value">${escapeHtml(clientInfo.user_agent)}</span></div>
-          </div>
-        </body>
-        </html>
-      `, {
-        headers: { 'Content-Type': 'text/html; charset=utf-8' }
-      });
-    }
-
-    // ============================================
-    // 1. 验证页面路由 (ADD THESE BACK!)
-    // ============================================
-    if (path === '/verify' && request.method === 'GET') {
-      return handleVerifyPage(env, url, request);
-    }
-    
-    if (path === '/verify' && request.method === 'POST') {
-      return handleVerifyAction(request, env);
-    }
-
-    // ============================================
-    // 2. 原有的 API 路由（接收 GTM 数据）
-    // ============================================
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      });
-    }
-
-    if (request.method !== 'POST') {
-      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-        status: 405,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-
-    try {
-      const data = await request.json();
-      
-      // ============================================
-      // Capture client information (IP, Country, User-Agent)
-      // ============================================
-      const clientInfo = getClientInfo(request);
-      
-      const client_id = String(data.client_id || 'unknown');
-      const rent = String(data.rent || '');
-      const property_price = String(data.property_price || '');
-      const size = String(data.size || '');
-      const district = String(data.district || '');
-      const property_type = String(data.property_type || '');
-      const agent_code = String((data.agent || '').toLowerCase());
-      const click_type = String(data.click_type || '');
-      const page_location = String(data.page_location || '');
-      const landing_page = String(data.landing_page || '');
-      
-      // ============================================
-      // SERVER-SIDE VALIDATION - Block bot requests
-      // Silent reject - logs to worker console but doesn't save to DB
-      // ============================================
-      
-      let blockReason = null;
-      
-      // Check 1: Missing click_type
-      if (!click_type || click_type === '') {
-        blockReason = 'missing_click_type';
-      }
-      // Check 2: Missing agent
-      else if (!agent_code || agent_code === '') {
-        blockReason = 'missing_agent';
-      }
-      // Check 3: Invalid client_id format
-      else if (!isValidClientId(client_id)) {
-        blockReason = 'invalid_client_id_format';
-      }
-      
-      // If any validation failed, log and silently reject
-      if (blockReason) {
-        // Log to Cloudflare Worker console for analysis
-        console.log(JSON.stringify({
-          type: 'BLOCKED_BOT',
-          reason: blockReason,
-          ip: clientInfo.user_ip,
-          country: clientInfo.user_country,
-          client_id: client_id,
-          click_type: click_type,
-          agent: agent_code,
-          user_agent: clientInfo.user_agent.substring(0, 200),
-          timestamp: new Date().toISOString()
-        }));
-        
-        // Return silent success (bot thinks it worked)
-        return new Response(JSON.stringify({ 
-          success: true,
-          message: 'Lead received'
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      }
-      
-      // ============================================
-      // Valid request - continue with normal processing
-      // ============================================
-      
-      const now = new Date();
-      const isoTime = now.toISOString();
-      const formattedTime = now.toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' });
-      
-      const utm_source = String(data.utm_source || '');
-      const utm_medium = String(data.utm_medium || '');
-      const utm_campaign = String(data.utm_campaign || '');
-      const utm_term = String(data.utm_term || '');
-      const utm_content = String(data.utm_content || '');
-      const gclid = String(data.gclid || '');
-      const referrer = String(data.referrer || '');
-      
-      const traffic_type = String(data.traffic_type || '');
-      const traffic_source = String(data.traffic_source || '');
-      const traffic_detail = String(data.traffic_detail || '');
-      const utm_id = getParamFromLandingPage(landing_page, 'utm_id');
-
-      // ============================================
-      // 提取搜索词
-      // ============================================
-      let search_query = '';
-      if (referrer && referrer.includes('google.com')) {
-        try {
-          const referrerUrl = new URL(referrer);
-          search_query = referrerUrl.searchParams.get('q') || '';
-          if (search_query) search_query = decodeURIComponent(search_query);
-        } catch (e) {}
-      }
-      if (landing_page && landing_page.includes('?') && !search_query) {
-        search_query = getParamFromLandingPage(landing_page, 'q');
-        if (search_query) search_query = decodeURIComponent(search_query);
-      }
-
-      // ============================================
-      // 0. 查询同一 client_id 的历史记录
-      // ============================================
-      let historyRecords = [];
-      try {
-        const historyStmt = await env.lead_db.prepare(`
-          SELECT id, agent_name, click_type, status, created_at, verified_at, verified_by
-          FROM leads WHERE client_id = ? ORDER BY id ASC LIMIT 10
-        `);
-        const { results } = await historyStmt.bind(client_id).all();
-        historyRecords = results;
-        console.log(`📋 Found ${historyRecords.length} history record(s) for client: ${client_id}`);
-      } catch (historyError) {
-        console.error('History query error:', historyError);
-      }
-
-      // ============================================
-      // 1. 获取代理信息（从数据库读取 dingtalk_id）
-      // ============================================
-      const DEFAULT_HOTLINE = env.DEFAULT_HOTLINE || '+85291333030';
-      let agent_phone = DEFAULT_HOTLINE;
-      let agent_dingtalk_id = null;
-      let agent_display_name = agent_code;
-      let agent_found = false;
-      
-      // Special handling for general_enquiry
-      if (agent_code === 'general_enquiry') {
-        let kvKey;
-        if (click_type === 'tel') {
-          kvKey = 'general_enquiry';
-        } else if (click_type === 'form') {
-          kvKey = 'general_enquiry_form';
-        } else {
-          kvKey = 'general_enquiry_msg';
-        }
-        try {
-          const kvValue = await env.AGENT_PHONE_MAP.get(kvKey);
-          if (kvValue) {
-            let parsedValue;
-            if (typeof kvValue === 'string' && kvValue.startsWith('[')) {
-              parsedValue = JSON.parse(kvValue);
-            } else {
-              parsedValue = kvValue;
-            }
-            // 新格式：["agent_name", "dingtalk_id"]
-            if (Array.isArray(parsedValue) && parsedValue.length >= 2) {
-              agent_display_name = parsedValue[0];
-              agent_dingtalk_id = parsedValue[1];
-              agent_found = true;
-              console.log(`✅ general_enquiry (${click_type}) → Agent: ${agent_display_name}, dingtalk_id: ${agent_dingtalk_id}`);
-            } else {
-              console.log(`⚠️ Invalid format for ${kvKey}, expected JSON array ["agent_name","dingtalk_id"]`);
-            }
-          } else {
-            console.log(`⚠️ KV key ${kvKey} not found, using defaults`);
-          }
-        } catch (e) {
-          console.error(`KV error for ${kvKey}:`, e);
-        }
-      } else if (agent_code) {
-        // 普通代理：从数据库查询 dingtalk_id
-        try {
-          const { results } = await env.lead_db.prepare(`
-            SELECT agent_name, phone_number, dingtalk_id 
-            FROM agents 
-            WHERE agent_name = ? AND is_active = 1
-          `).bind(agent_code).all();
-          
-          if (results.length > 0) {
-            agent_display_name = results[0].agent_name;
-            agent_phone = results[0].phone_number;
-            agent_dingtalk_id = results[0].dingtalk_id;
-            agent_found = true;
-            console.log(`✅ Agent found: ${agent_code} → dingtalk_id: ${agent_dingtalk_id}`);
-          } else {
-            console.log(`⚠️ Agent not found in DB: ${agent_code}`);
-          }
-        } catch (dbError) {
-          console.error('DB query error:', dbError);
-        }
-      }
-
-      if (agent_phone && !agent_phone.startsWith('+')) {
-        agent_phone = '+' + agent_phone;
-      }
-
-      // ============================================
-      // 2. 写入数据库 (UPDATED with IP, Country, User-Agent)
-      // ============================================
-      let leadId = null;
-      let dbError = null;
-      try {
-        const insertStmt = await env.lead_db.prepare(`
-          INSERT INTO leads (
-            client_id, agent_name, agent_phone, click_type,
-            rent, property_price, size, district, property_type,
-            page_location, page_referrer, landing_page,
-            utm_source, utm_medium, utm_campaign, utm_term, utm_content,
-            gclid, traffic_type, traffic_source, traffic_detail,
-            search_query, status, utm_id, created_at,
-            user_ip, user_country, user_agent
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        const result = await insertStmt.bind(
-          client_id, agent_display_name, agent_phone, click_type,
-          rent, property_price, size, district, property_type,
-          page_location, referrer, landing_page,
-          utm_source, utm_medium, utm_campaign, utm_term, utm_content,
-          gclid, traffic_type, traffic_source, traffic_detail,
-          search_query, 'pending', utm_id, isoTime,
-          clientInfo.user_ip, clientInfo.user_country, clientInfo.user_agent
-        ).run();
-
-        leadId = result.meta.last_row_id;
-        console.log(`✅ Lead saved, ID: ${leadId} | Agent: ${agent_display_name} | IP: ${clientInfo.user_ip} | Country: ${clientInfo.user_country}`);
-      } catch (error) {
-        dbError = error;
-        console.error('❌ Database insert error:', error);
-      }
-
-      // ============================================
-      // 3. 获取钉钉凭证（使用缓存）
-      // ============================================
-      const DINGTALK_APP_KEY = env.DINGTALK_APP_KEY;
-      const DINGTALK_APP_SECRET = env.DINGTALK_APP_SECRET;
-      const DINGTALK_AGENT_ID = env.DINGTALK_AGENT_ID;
-
-      if (!DINGTALK_APP_KEY || !DINGTALK_APP_SECRET || !DINGTALK_AGENT_ID) {
-        console.error('Missing DingTalk credentials');
-        return new Response(JSON.stringify({ 
-          success: true, 
-          lead_id: leadId,
-          warning: 'DingTalk credentials missing'
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      }
-
-      let accessToken;
-      let tokenSource = 'unknown';
-      try {
-        const tokenResult = await getCachedAccessToken(env);
-        accessToken = tokenResult.token;
-        tokenSource = tokenResult.source;
-        console.log(`📊 Token source: ${tokenSource}`);
-      } catch (tokenError) {
-        console.error('Token error:', tokenError);
-        return new Response(JSON.stringify({ 
-          success: true, 
-          lead_id: leadId,
-          warning: 'DingTalk token error'
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
-      }
-
-      // 构建房源信息摘要
-      const propertyLines = [];
-      if (rent) propertyLines.push(`💰 **租:** ${rent}`);
-      if (property_price) propertyLines.push(`🏷️ **售:** ${property_price}`);
-      if (size) propertyLines.push(`📐 **面积:** ${size}`);
-      if (district) propertyLines.push(`📍 **区域:** ${district}`);
-      if (property_type) propertyLines.push(`🏢 **类型:** ${property_type}`);
-      
-      const propertyInfo = propertyLines.length > 0 
-        ? propertyLines.join('\n') 
-        : '📋 暂无房源详细信息';
-
-      // 构建营销来源信息
-      const marketingLines = [];
-      if (traffic_type) marketingLines.push(`**流量类型:** ${traffic_type}`);
-      if (traffic_source) marketingLines.push(`**来源:** ${traffic_source}`);
-      if (traffic_detail) marketingLines.push(`**详情:** ${traffic_detail}`);
-      if (utm_source) marketingLines.push(`**UTM来源:** ${utm_source}`);
-      if (utm_medium) marketingLines.push(`**UTM媒介:** ${utm_medium}`);
-      if (utm_campaign) marketingLines.push(`**UTM活动:** ${utm_campaign}`);
-      if (utm_term) marketingLines.push(`**UTM关键词:** ${utm_term}`);
-      if (gclid) marketingLines.push(`**GCLID:** \`${gclid.substring(0, 30)}...\``);
-      
-      const marketingInfo = marketingLines.length > 0 
-        ? marketingLines.join('\n') 
-        : '未检测到来源信息';
-
-      // ============================================
-      // 构建历史记录部分
-      // ============================================
-      let historySection = '';
-      if (historyRecords.length > 0) {
-        const historyLines = [];
-        historyLines.push(`\n\n---\n\n### 📜 历史记录 (同一客户)\n\n`);
-        historyLines.push(`| ID | 日期 | 代理 | 来源 | 状态 | 处理人 | 处理时间 |`);
-        historyLines.push(`|----|------|------|------|------|--------|----------|`);
-        
-        for (const record of historyRecords) {
-          if (record.id === leadId) continue;
-          
-          let recordDate = record.created_at || '未知';
-          if (recordDate && recordDate !== '未知') {
-            try {
-              recordDate = new Date(recordDate).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' });
-            } catch (e) {}
-          }
-          
-          const recordId = record.id;
-          const recordAgent = record.agent_name || '未知';
-          const recordClickType = record.click_type || '未知';
-          let recordStatus = record.status === 'pending' ? '⏳ 待处理' : (record.status === 'verified' ? '✅ 确认有效' : '❌ 确认垃圾');
-          // ADDED: 未有来电 status display in history
-          if (record.value === 1) {
-            recordStatus = '🚫 未有来电';
-          }
-          
-          const recordVerifiedBy = record.verified_by || '-';
-          
-          let recordVerifiedDate = record.verified_at || '未处理';
-          if (recordVerifiedDate && recordVerifiedDate !== '未处理') {
-            try {
-              recordVerifiedDate = new Date(recordVerifiedDate).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' });
-            } catch (e) {}
-          }
-          
-          historyLines.push(`| ${recordId} | ${recordDate} | ${recordAgent} | ${recordClickType} | ${recordStatus} | ${recordVerifiedBy} | ${recordVerifiedDate} |`);
-        }
-        
-        if (historyLines.length > 2) {
-          historySection = historyLines.join('\n');
-          const historyCount = historyRecords.length - (leadId ? 1 : 0);
-          if (historyCount > 0) {
-            historySection += `\n\n⚠️ **注意：该客户已有 ${historyCount} 次历史咨询记录，请确认是否需要重复跟进！**`;
-          }
-        }
-      }
-
-      const repeatWarning = data.previous_conversion ? '\n\n⚠️ **该用户之前已点击过咨询按钮！**' : '';
-
-      // ============================================
-      // 构建验证链接
-      // ============================================
-      const host = request.headers.get('host');
-      const verifyUrl = `https://${host}/verify?id=${leadId}`;
-
-      // ============================================
-      // 构建完整的钉钉消息
-      // ============================================
-      let messageText = `## 📞 新线索通知\n\n` +
-        `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
-        `${formattedTime}\n\n` +
-        `---\n\n` +
-        `**客号:** \`${client_id}\`\n\n` +
-        `**IP:** ${clientInfo.user_ip}\n\n` +
-        `**地区:** ${clientInfo.user_country}\n\n` +
-        `---\n\n` +
-        `${propertyInfo}\n\n` +
-        `---\n\n` +
-        `### 👤 ${agent_display_name}\n\n` +
-        `---\n\n` +
-        `### 🎯 线索来源\n\n` +
-        `**接收模式:** ${click_type || '未知'}\n\n`;
-      
-      if (search_query) {
-        messageText += `**🔍 搜索词:** ${search_query}\n\n`;
-      }
-      
-      messageText += `${marketingInfo}\n\n` +
-        `---\n\n` +
-        `### 🌐 落地页\n\n` +
-        `${landing_page || '未知'}\n\n` +
-        `---\n\n` +
-        `### 📍 点击页面\n\n` +
-        `${page_location || '未知'}\n\n` +
-        `---\n\n` +
-        `### 🔗 [验证线索](${verifyUrl})\n\n` +
-        `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
-        `---\n\n` +
-        `${repeatWarning}${historySection}`;
-      
-      // ============================================
-      // 4. 发送消息给代理（直接使用 dingtalk_id，不调用 API）
-      // ============================================
-      let agentSentCount = 0;
-      if (agent_dingtalk_id) {
-        await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), [agent_dingtalk_id], '📞 新线索通知', messageText, env);
-        agentSentCount = 1;
-        console.log(`✅ Message sent to agent: ${agent_display_name} (${agent_dingtalk_id})`);
-      } else {
-        console.warn(`⚠️ No dingtalk_id for agent: ${agent_display_name}, message not sent.`);
-      }
-
-      // ============================================
-      // 5. 发送副本给管理员（从数据库读取 admin=1 的 dingtalk_id）
-      // ============================================
-      const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
-        `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
-        `${formattedTime}\n\n` +
-        `---\n\n` +
-        `**客号:** \`${client_id}\`\n\n` +
-        `**IP:** ${clientInfo.user_ip}\n\n` +
-        `**地区:** ${clientInfo.user_country}\n\n` +
-        `**代理:** ${agent_display_name}\n\n` +
-        `**代理电话:** ${agent_phone}\n\n` +
-        `---\n\n` +
-        `${propertyInfo}\n\n` +
-        `---\n\n` +
-        `### 🎯 线索来源\n\n` +
-        `**接收模式:** ${click_type || '未知'}\n\n` +
-        (search_query ? `**🔍 搜索词:** ${search_query}\n\n` : '') +
-        `${marketingInfo}\n\n` +
-        `---\n\n` +
-        `### 🌐 落地页\n\n` +
-        `${landing_page || '未知'}\n\n` +
-        `---\n\n` +
-        `### 📍 点击页面\n\n` +
-        `${page_location || '未知'}\n\n` +
-        `---\n\n` +
-        `### 🔗 [验证线索](${verifyUrl})\n\n` +
-        `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
-        `---\n\n` +
-        `⚠️ 此消息为系统自动发送的副本。${historySection}`;
-
-      let adminSentCount = 0;
-      try {
-        const { results } = await env.lead_db.prepare(`
-          SELECT dingtalk_id FROM agents WHERE admin = 1 AND is_active = 1 AND dingtalk_id IS NOT NULL
-        `).all();
-        
-        const adminDingtalkIds = results.map(row => row.dingtalk_id);
-        
-        if (adminDingtalkIds.length > 0) {
-          const sendResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), adminDingtalkIds, '📋 线索副本', adminMessageText, env);
-          if (sendResult && sendResult.errcode === 0) {
-            adminSentCount = adminDingtalkIds.length;
-            console.log(`✅ Message sent to ${adminSentCount} admin(s) (1 API call)`);
-          }
-        }
-      } catch (adminError) {
-        console.error('Admin query error:', adminError);
-      }
-
-      // 返回成功
-      return new Response(JSON.stringify({ 
-        success: true, 
-        lead_id: leadId,
-        client_id: client_id,
-        agent_mapped: agent_found,
-        agent_display_name: agent_display_name,
-        agent_message_sent: agentSentCount,
-        admin_copies_sent: adminSentCount,
-        history_count: historyRecords.length,
-        db_error: dbError ? dbError.message : null,
-        user_ip: clientInfo.user_ip,
-        user_country: clientInfo.user_country
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-
-    } catch (error) {
-      console.error('Worker error:', error);
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-  },
-};
-
 // ============================================
-// MODIFIED: handleVerifyPage with value-based status (Simplified)
+// VERIFICATION HANDLERS
 // ============================================
 
 async function handleVerifyPage(env, url, request) {
@@ -994,7 +422,6 @@ async function handleVerifyPage(env, url, request) {
   const mode = url.searchParams.get('mode');
   const isRecoveryMode = (mode === 'recovery');
   
-  // Check for verified leads (value > 1)
   const verifiedRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
@@ -1003,7 +430,6 @@ async function handleVerifyPage(env, url, request) {
     LIMIT 1
   `).bind(lead.client_id).first();
   
-  // Check for rejected or noshow leads (value = 0 OR value = 1)
   const rejectedOrNoshowRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
@@ -1012,7 +438,6 @@ async function handleVerifyPage(env, url, request) {
     LIMIT 1
   `).bind(lead.client_id).first();
   
-  // If verified (value > 1), show locked page
   if (verifiedRecord) {
     const html = `<!DOCTYPE html>
 <html lang="zh-HK">
@@ -1031,7 +456,6 @@ async function handleVerifyPage(env, url, request) {
     return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   }
   
-  // Show recovery page for rejected OR noshow (value = 0 OR value = 1)
   if (isRecoveryMode && rejectedOrNoshowRecord) {
     // 继续往下执行
   } else if (rejectedOrNoshowRecord && !isRecoveryMode) {
@@ -1059,7 +483,6 @@ async function handleVerifyPage(env, url, request) {
     try { districts = JSON.parse(districtsJson); } catch (e) {}
   }
   
-  // Rent and Buy options (keep as is)
   const rentOptions = [
     { value: '0', label: '0 (拒绝/垃圾)', baseValue: 0 },
     { value: '1', label: '未有来电', baseValue: 1 },
@@ -1306,10 +729,6 @@ async function handleVerifyPage(env, url, request) {
   return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
-// ============================================
-// MODIFIED: handleVerifyAction with value-based status (No Default)
-// ============================================
-
 async function handleVerifyAction(request, env) {
   try {
     const { id, district, transaction_type, budget_range, value, verified_by, is_recovery } = await request.json();
@@ -1327,31 +746,24 @@ async function handleVerifyAction(request, env) {
     let finalValue = value;
     let finalTransactionType = transaction_type;
     
-    // 🔥 If value is 0 or 1, set transaction_type to 'rent'
     if (value === 0 || value === 1) {
       finalTransactionType = 'rent';
     }
     
-    // 🔥 In recovery mode, use the value the agent selected from the dropdown
-    // No default value is set - the agent must choose a budget range
     if (is_recovery) {
-      // Just use whatever value was passed from the frontend
       finalValue = value;
-      // Keep transaction_type as 'rent' (it was already set when rejected/noshow)
       finalTransactionType = 'rent';
     }
     
-    // 🔥 Determine status based on final value
     let status;
     if (finalValue === 0) {
       status = 'rejected';
     } else if (finalValue === 1) {
       status = 'noshow';
     } else {
-      status = 'verified';  // value > 1
+      status = 'verified';
     }
     
-    // Update the lead
     const result = await env.lead_db.prepare(`
       UPDATE leads 
       SET status = ?, verified_at = ?, verified_by = ?,
@@ -1378,3 +790,498 @@ async function handleVerifyAction(request, env) {
     });
   }
 }
+
+// ============================================
+// MAIN FETCH HANDLER
+// ============================================
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    
+    // Test route (uncomment when needed)
+    // if (path === '/test' && request.method === 'GET') {
+    //   return handleTestMessage(env);
+    // }
+
+    // IP Test Route
+    if (path === '/test-ip' && request.method === 'GET') {
+      const clientInfo = getClientInfo(request);
+      return new Response(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>IP Capture Test</title>
+          <style>
+            body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+            h1 { color: #4ec9b0; }
+            .info { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-top: 20px; }
+            .label { color: #9cdcfe; font-weight: bold; }
+            .value { color: #4ec9b0; margin-left: 10px; }
+          </style>
+        </head>
+        <body>
+          <h1>🌐 IP Capture Test</h1>
+          <div class="info">
+            <div><span class="label">User IP:</span> <span class="value">${escapeHtml(clientInfo.user_ip)}</span></div>
+            <div><span class="label">Country:</span> <span class="value">${escapeHtml(clientInfo.user_country)}</span></div>
+            <div><span class="label">User Agent:</span> <span class="value">${escapeHtml(clientInfo.user_agent)}</span></div>
+          </div>
+        </body>
+        </html>
+      `, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+    }
+
+    // Verification routes
+    if (path === '/verify' && request.method === 'GET') {
+      return handleVerifyPage(env, url, request);
+    }
+    
+    if (path === '/verify' && request.method === 'POST') {
+      return handleVerifyAction(request, env);
+    }
+
+    // CORS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    }
+
+    // Only accept POST requests for lead data
+    if (request.method !== 'POST') {
+      return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+        status: 405,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    try {
+      const data = await request.json();
+      const clientInfo = getClientInfo(request);
+      
+      const client_id = String(data.client_id || 'unknown');
+      const rent = String(data.rent || '');
+      const property_price = String(data.property_price || '');
+      const size = String(data.size || '');
+      const district = String(data.district || '');
+      const property_type = String(data.property_type || '');
+      const agent_code = String((data.agent || '').toLowerCase());
+      const click_type = String(data.click_type || '');
+      const page_location = String(data.page_location || '');
+      const landing_page = String(data.landing_page || '');
+      
+      // Server-side validation
+      let blockReason = null;
+      if (!click_type || click_type === '') {
+        blockReason = 'missing_click_type';
+      } else if (!agent_code || agent_code === '') {
+        blockReason = 'missing_agent';
+      } else if (!isValidClientId(client_id)) {
+        blockReason = 'invalid_client_id_format';
+      }
+      
+      if (blockReason) {
+        console.log(JSON.stringify({
+          type: 'BLOCKED_BOT',
+          reason: blockReason,
+          ip: clientInfo.user_ip,
+          country: clientInfo.user_country,
+          client_id: client_id,
+          click_type: click_type,
+          agent: agent_code,
+          user_agent: clientInfo.user_agent.substring(0, 200),
+          timestamp: new Date().toISOString()
+        }));
+        
+        return new Response(JSON.stringify({ 
+          success: true,
+          message: 'Lead received'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+      
+      const now = new Date();
+      const isoTime = now.toISOString();
+      const formattedTime = now.toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' });
+      
+      const utm_source = String(data.utm_source || '');
+      const utm_medium = String(data.utm_medium || '');
+      const utm_campaign = String(data.utm_campaign || '');
+      const utm_term = String(data.utm_term || '');
+      const utm_content = String(data.utm_content || '');
+      const gclid = String(data.gclid || '');
+      const referrer = String(data.referrer || '');
+      
+      const traffic_type = String(data.traffic_type || '');
+      const traffic_source = String(data.traffic_source || '');
+      const traffic_detail = String(data.traffic_detail || '');
+      const utm_id = getParamFromLandingPage(landing_page, 'utm_id');
+
+      // Extract search query
+      let search_query = '';
+      if (referrer && referrer.includes('google.com')) {
+        try {
+          const referrerUrl = new URL(referrer);
+          search_query = referrerUrl.searchParams.get('q') || '';
+          if (search_query) search_query = decodeURIComponent(search_query);
+        } catch (e) {}
+      }
+      if (landing_page && landing_page.includes('?') && !search_query) {
+        search_query = getParamFromLandingPage(landing_page, 'q');
+        if (search_query) search_query = decodeURIComponent(search_query);
+      }
+
+      // Query history
+      let historyRecords = [];
+      try {
+        const historyStmt = await env.lead_db.prepare(`
+          SELECT id, agent_name, click_type, status, created_at, verified_at, verified_by
+          FROM leads WHERE client_id = ? ORDER BY id ASC LIMIT 10
+        `);
+        const { results } = await historyStmt.bind(client_id).all();
+        historyRecords = results;
+        console.log(`📋 Found ${historyRecords.length} history record(s) for client: ${client_id}`);
+      } catch (historyError) {
+        console.error('History query error:', historyError);
+      }
+
+      // Get agent info
+      const DEFAULT_HOTLINE = env.DEFAULT_HOTLINE || '+85291333030';
+      let agent_phone = DEFAULT_HOTLINE;
+      let agent_dingtalk_id = null;
+      let agent_display_name = agent_code;
+      let agent_found = false;
+      
+      if (agent_code === 'general_enquiry') {
+        let kvKey;
+        if (click_type === 'tel') {
+          kvKey = 'general_enquiry';
+        } else if (click_type === 'form') {
+          kvKey = 'general_enquiry_form';
+        } else {
+          kvKey = 'general_enquiry_msg';
+        }
+        try {
+          const kvValue = await env.AGENT_PHONE_MAP.get(kvKey);
+          if (kvValue) {
+            let parsedValue;
+            if (typeof kvValue === 'string' && kvValue.startsWith('[')) {
+              parsedValue = JSON.parse(kvValue);
+            } else {
+              parsedValue = kvValue;
+            }
+            if (Array.isArray(parsedValue) && parsedValue.length >= 2) {
+              agent_display_name = parsedValue[0];
+              agent_dingtalk_id = parsedValue[1];
+              agent_found = true;
+              console.log(`✅ general_enquiry (${click_type}) → Agent: ${agent_display_name}, dingtalk_id: ${agent_dingtalk_id}`);
+            } else {
+              console.log(`⚠️ Invalid format for ${kvKey}, expected JSON array ["agent_name","dingtalk_id"]`);
+            }
+          } else {
+            console.log(`⚠️ KV key ${kvKey} not found, using defaults`);
+          }
+        } catch (e) {
+          console.error(`KV error for ${kvKey}:`, e);
+        }
+      } else if (agent_code) {
+        try {
+          const { results } = await env.lead_db.prepare(`
+            SELECT agent_name, phone_number, dingtalk_id 
+            FROM agents 
+            WHERE agent_name = ? AND is_active = 1
+          `).bind(agent_code).all();
+          
+          if (results.length > 0) {
+            agent_display_name = results[0].agent_name;
+            agent_phone = results[0].phone_number;
+            agent_dingtalk_id = results[0].dingtalk_id;
+            agent_found = true;
+            console.log(`✅ Agent found: ${agent_code} → dingtalk_id: ${agent_dingtalk_id}`);
+          } else {
+            console.log(`⚠️ Agent not found in DB: ${agent_code}`);
+          }
+        } catch (dbError) {
+          console.error('DB query error:', dbError);
+        }
+      }
+
+      if (agent_phone && !agent_phone.startsWith('+')) {
+        agent_phone = '+' + agent_phone;
+      }
+
+      // Save to database
+      let leadId = null;
+      let dbError = null;
+      try {
+        const insertStmt = await env.lead_db.prepare(`
+          INSERT INTO leads (
+            client_id, agent_name, agent_phone, click_type,
+            rent, property_price, size, district, property_type,
+            page_location, page_referrer, landing_page,
+            utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+            gclid, traffic_type, traffic_source, traffic_detail,
+            search_query, status, utm_id, created_at,
+            user_ip, user_country, user_agent
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const result = await insertStmt.bind(
+          client_id, agent_display_name, agent_phone, click_type,
+          rent, property_price, size, district, property_type,
+          page_location, referrer, landing_page,
+          utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+          gclid, traffic_type, traffic_source, traffic_detail,
+          search_query, 'pending', utm_id, isoTime,
+          clientInfo.user_ip, clientInfo.user_country, clientInfo.user_agent
+        ).run();
+
+        leadId = result.meta.last_row_id;
+        console.log(`✅ Lead saved, ID: ${leadId} | Agent: ${agent_display_name} | IP: ${clientInfo.user_ip} | Country: ${clientInfo.user_country}`);
+      } catch (error) {
+        dbError = error;
+        console.error('❌ Database insert error:', error);
+      }
+
+      // Get DingTalk token
+      const DINGTALK_APP_KEY = env.DINGTALK_APP_KEY;
+      const DINGTALK_APP_SECRET = env.DINGTALK_APP_SECRET;
+      const DINGTALK_AGENT_ID = env.DINGTALK_AGENT_ID;
+
+      if (!DINGTALK_APP_KEY || !DINGTALK_APP_SECRET || !DINGTALK_AGENT_ID) {
+        console.error('Missing DingTalk credentials');
+        return new Response(JSON.stringify({ 
+          success: true, 
+          lead_id: leadId,
+          warning: 'DingTalk credentials missing'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+
+      let accessToken;
+      let tokenSource = 'unknown';
+      try {
+        const tokenResult = await getCachedAccessToken(env);
+        accessToken = tokenResult.token;
+        tokenSource = tokenResult.source;
+        console.log(`📊 Token source: ${tokenSource}`);
+      } catch (tokenError) {
+        console.error('Token error:', tokenError);
+        return new Response(JSON.stringify({ 
+          success: true, 
+          lead_id: leadId,
+          warning: 'DingTalk token error'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+
+      // Build property info
+      const propertyLines = [];
+      if (rent) propertyLines.push(`💰 **租:** ${rent}`);
+      if (property_price) propertyLines.push(`🏷️ **售:** ${property_price}`);
+      if (size) propertyLines.push(`📐 **面积:** ${size}`);
+      if (district) propertyLines.push(`📍 **区域:** ${district}`);
+      if (property_type) propertyLines.push(`🏢 **类型:** ${property_type}`);
+      
+      const propertyInfo = propertyLines.length > 0 
+        ? propertyLines.join('\n') 
+        : '📋 暂无房源详细信息';
+
+      // Build marketing info
+      const marketingLines = [];
+      if (traffic_type) marketingLines.push(`**流量类型:** ${traffic_type}`);
+      if (traffic_source) marketingLines.push(`**来源:** ${traffic_source}`);
+      if (traffic_detail) marketingLines.push(`**详情:** ${traffic_detail}`);
+      if (utm_source) marketingLines.push(`**UTM来源:** ${utm_source}`);
+      if (utm_medium) marketingLines.push(`**UTM媒介:** ${utm_medium}`);
+      if (utm_campaign) marketingLines.push(`**UTM活动:** ${utm_campaign}`);
+      if (utm_term) marketingLines.push(`**UTM关键词:** ${utm_term}`);
+      if (gclid) marketingLines.push(`**GCLID:** \`${gclid.substring(0, 30)}...\``);
+      
+      const marketingInfo = marketingLines.length > 0 
+        ? marketingLines.join('\n') 
+        : '未检测到来源信息';
+
+      // Build history section
+      let historySection = '';
+      if (historyRecords.length > 0) {
+        const historyLines = [];
+        historyLines.push(`\n\n---\n\n### 📜 历史记录 (同一客户)\n\n`);
+        historyLines.push(`| ID | 日期 | 代理 | 来源 | 状态 | 处理人 | 处理时间 |`);
+        historyLines.push(`|----|------|------|------|------|--------|----------|`);
+        
+        for (const record of historyRecords) {
+          if (record.id === leadId) continue;
+          
+          let recordDate = record.created_at || '未知';
+          if (recordDate && recordDate !== '未知') {
+            try {
+              recordDate = new Date(recordDate).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' });
+            } catch (e) {}
+          }
+          
+          const recordId = record.id;
+          const recordAgent = record.agent_name || '未知';
+          const recordClickType = record.click_type || '未知';
+          let recordStatus = record.status === 'pending' ? '⏳ 待处理' : (record.status === 'verified' ? '✅ 确认有效' : '❌ 确认垃圾');
+          if (record.value === 1) {
+            recordStatus = '🚫 未有来电';
+          }
+          
+          const recordVerifiedBy = record.verified_by || '-';
+          
+          let recordVerifiedDate = record.verified_at || '未处理';
+          if (recordVerifiedDate && recordVerifiedDate !== '未处理') {
+            try {
+              recordVerifiedDate = new Date(recordVerifiedDate).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' });
+            } catch (e) {}
+          }
+          
+          historyLines.push(`| ${recordId} | ${recordDate} | ${recordAgent} | ${recordClickType} | ${recordStatus} | ${recordVerifiedBy} | ${recordVerifiedDate} |`);
+        }
+        
+        if (historyLines.length > 2) {
+          historySection = historyLines.join('\n');
+          const historyCount = historyRecords.length - (leadId ? 1 : 0);
+          if (historyCount > 0) {
+            historySection += `\n\n⚠️ **注意：该客户已有 ${historyCount} 次历史咨询记录，请确认是否需要重复跟进！**`;
+          }
+        }
+      }
+
+      const repeatWarning = data.previous_conversion ? '\n\n⚠️ **该用户之前已点击过咨询按钮！**' : '';
+      const host = request.headers.get('host');
+      const verifyUrl = `https://${host}/verify?id=${leadId}`;
+
+      // Build message
+      let messageText = `## 📞 新线索通知\n\n` +
+        `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
+        `${formattedTime}\n\n` +
+        `---\n\n` +
+        `**客号:** \`${client_id}\`\n\n` +
+        `**IP:** ${clientInfo.user_ip}\n\n` +
+        `**地区:** ${clientInfo.user_country}\n\n` +
+        `---\n\n` +
+        `${propertyInfo}\n\n` +
+        `---\n\n` +
+        `### 👤 ${agent_display_name}\n\n` +
+        `---\n\n` +
+        `### 🎯 线索来源\n\n` +
+        `**接收模式:** ${click_type || '未知'}\n\n`;
+      
+      if (search_query) {
+        messageText += `**🔍 搜索词:** ${search_query}\n\n`;
+      }
+      
+      messageText += `${marketingInfo}\n\n` +
+        `---\n\n` +
+        `### 🌐 落地页\n\n` +
+        `${landing_page || '未知'}\n\n` +
+        `---\n\n` +
+        `### 📍 点击页面\n\n` +
+        `${page_location || '未知'}\n\n` +
+        `---\n\n` +
+        `### 🔗 [验证线索](${verifyUrl})\n\n` +
+        `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
+        `---\n\n` +
+        `${repeatWarning}${historySection}`;
+      
+      // Send to agent
+      let agentSentCount = 0;
+      if (agent_dingtalk_id) {
+        await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), [agent_dingtalk_id], '📞 新线索通知', messageText, env);
+        agentSentCount = 1;
+        console.log(`✅ Message sent to agent: ${agent_display_name} (${agent_dingtalk_id})`);
+      } else {
+        console.warn(`⚠️ No dingtalk_id for agent: ${agent_display_name}, message not sent.`);
+      }
+
+      // Send to admins
+      const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
+        `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
+        `${formattedTime}\n\n` +
+        `---\n\n` +
+        `**客号:** \`${client_id}\`\n\n` +
+        `**IP:** ${clientInfo.user_ip}\n\n` +
+        `**地区:** ${clientInfo.user_country}\n\n` +
+        `**代理:** ${agent_display_name}\n\n` +
+        `**代理电话:** ${agent_phone}\n\n` +
+        `---\n\n` +
+        `${propertyInfo}\n\n` +
+        `---\n\n` +
+        `### 🎯 线索来源\n\n` +
+        `**接收模式:** ${click_type || '未知'}\n\n` +
+        (search_query ? `**🔍 搜索词:** ${search_query}\n\n` : '') +
+        `${marketingInfo}\n\n` +
+        `---\n\n` +
+        `### 🌐 落地页\n\n` +
+        `${landing_page || '未知'}\n\n` +
+        `---\n\n` +
+        `### 📍 点击页面\n\n` +
+        `${page_location || '未知'}\n\n` +
+        `---\n\n` +
+        `### 🔗 [验证线索](${verifyUrl})\n\n` +
+        `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
+        `---\n\n` +
+        `⚠️ 此消息为系统自动发送的副本。${historySection}`;
+
+      let adminSentCount = 0;
+      try {
+        const { results } = await env.lead_db.prepare(`
+          SELECT dingtalk_id FROM agents WHERE admin = 1 AND is_active = 1 AND dingtalk_id IS NOT NULL
+        `).all();
+        
+        const adminDingtalkIds = results.map(row => row.dingtalk_id);
+        
+        if (adminDingtalkIds.length > 0) {
+          const sendResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), adminDingtalkIds, '📋 线索副本', adminMessageText, env);
+          if (sendResult && sendResult.errcode === 0) {
+            adminSentCount = adminDingtalkIds.length;
+            console.log(`✅ Message sent to ${adminSentCount} admin(s) (1 API call)`);
+          }
+        }
+      } catch (adminError) {
+        console.error('Admin query error:', adminError);
+      }
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        lead_id: leadId,
+        client_id: client_id,
+        agent_mapped: agent_found,
+        agent_display_name: agent_display_name,
+        agent_message_sent: agentSentCount,
+        admin_copies_sent: adminSentCount,
+        history_count: historyRecords.length,
+        db_error: dbError ? dbError.message : null,
+        user_ip: clientInfo.user_ip,
+        user_country: clientInfo.user_country
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+
+    } catch (error) {
+      console.error('Worker error:', error);
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+  },
+};
