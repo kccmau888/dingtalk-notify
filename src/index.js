@@ -919,7 +919,7 @@ async function handleVerifyPage(env, url, request) {
   const verifiedRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
-    WHERE client_id = ? AND status = 'verified'
+    WHERE client_id = ? AND status = 'verified' AND status > 1
     ORDER BY verified_at DESC
     LIMIT 1
   `).bind(lead.client_id).first();
@@ -927,7 +927,7 @@ async function handleVerifyPage(env, url, request) {
   const rejectedRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
-    WHERE client_id = ? AND status = 'rejected'
+    WHERE client_id = ? AND status = 'rejected' OR value = 1
     ORDER BY verified_at DESC
     LIMIT 1
   `).bind(lead.client_id).first();
@@ -992,7 +992,7 @@ async function handleVerifyPage(env, url, request) {
 <div class="warning-message"><strong>此线索曾被标记为垃圾线索！</strong><br><br>
 <div class="info-row"><span class="info-label">原处理代理：</span><span class="info-value">${escapeHtml(rejectedRecord.agent_name) || '未知'}</span></div>
 <div class="info-row"><span class="info-label">原处理时间：</span><span class="info-value">${new Date(rejectedRecord.verified_at).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' })}</span></div></div>
-<p style="margin-bottom:20px;color:#666;">该线索曾被标记为垃圾/无关询问，如需重新确认，请点击下方按钮继续。</p>
+<p style="margin-bottom:20px;color:#666;">该线索曾被标记为垃圾/未有来电或讯息，如需重新确认，请点击下方按钮继续。</p>
 <div class="button-group"><a href="/verify?id=${leadId}&mode=recovery" class="btn btn-verify" style="text-decoration:none;text-align:center;display:inline-block;">✅ 继续验证此线索</a></div></div>
 <div class="footer">此线索来自 LeasingHub 系统</div></div>
 </body></html>`;
@@ -1111,7 +1111,7 @@ async function handleVerifyPage(env, url, request) {
     }
     
     if (value === 1) {
-      document.getElementById('valueDisplay').innerHTML = '🚫 未有来电 (客户预约后未出现)';
+      document.getElementById('valueDisplay').innerHTML = '🚫 未有来电/讯息';
       document.getElementById('valueDisplay').style.color = '#6c757d';
     } else if (value === 0) {
       document.getElementById('valueDisplay').innerHTML = '❌ 已拒绝/垃圾线索';
