@@ -1,20 +1,38 @@
 // ============================================
 // Initial First Deployment (MODIFIED - Added 未有来电 support)
 // ============================================
-
 async function getCachedAccessToken(env) {
   const cached = await env.AGENT_PHONE_MAP.get('dingtalk_access_token');
+  
   if (cached) {
     try {
       const data = JSON.parse(cached);
+      const remaining = Math.floor((data.expires_at - Date.now()) / 1000);
+      
+      console.log(`📊 Cached token found. Expires in: ${remaining} seconds`);
+      
       if (data.expires_at > Date.now()) {
-        console.log('✅ Using cached access_token');
-        return data.access_token;
+        console.log(`✅ Using cached token (${remaining}s remaining)`);
+        console.log(`📋 Token preview: ${data.access_token.substring(0, 15)}...`);
+        return {
+          token: data.access_token,
+          source: 'cached',
+          expires_in: remaining,
+          expires_at: data.expires_at
+        };
+      } else {
+        console.log(`⚠️ Cached token EXPIRED (${Math.abs(remaining)}s ago)`);
       }
-    } catch(e) {}
+    } catch(e) {
+      console.log('⚠️ Failed to parse cached token, fetching new one');
+    }
+  } else {
+    console.log('📭 No cached token found');
   }
   
-  console.log('🔄 Fetching new access_token...');
+  console.log('🔄 Fetching NEW access_token from DingTalk...');
+  const startTime = Date.now();
+  
   const tokenUrl = `https://oapi.dingtalk.com/gettoken?appkey=${env.DINGTALK_APP_KEY}&appsecret=${env.DINGTALK_APP_SECRET}`;
   const tokenRes = await fetch(tokenUrl);
   const tokenData = await tokenRes.json();
@@ -23,13 +41,24 @@ async function getCachedAccessToken(env) {
     throw new Error(`Token error: ${tokenData.errmsg}`);
   }
   
+  const elapsed = Date.now() - startTime;
+  const expiresAt = Date.now() + 100 * 60 * 1000;
+  
   await env.AGENT_PHONE_MAP.put('dingtalk_access_token', JSON.stringify({
     access_token: tokenData.access_token,
-    expires_at: Date.now() + 100 * 60 * 1000
+    expires_at: expiresAt
   }));
   
-  console.log('✅ New access_token cached');
-  return tokenData.access_token;
+  console.log(`✅ New token fetched in ${elapsed}ms`);
+  console.log(`📋 Token preview: ${tokenData.access_token.substring(0, 15)}...`);
+  console.log(`⏰ Token expires at: ${new Date(expiresAt).toLocaleString()}`);
+  
+  return {
+    token: tokenData.access_token,
+    source: 'new',
+    expires_in: 100 * 60,
+    expires_at: expiresAt
+  };
 }
 
 async function sendDingTalkMessage(accessToken, agentId, userIds, title, text) {
@@ -53,8 +82,18 @@ async function sendDingTalkMessage(accessToken, agentId, userIds, title, text) {
   });
   
   const sendData = await sendRes.json();
+  
+  // 🔥 Check if token is invalid
+  if (sendData.errcode === 40014 || sendData.errcode === 40015) {
+    console.warn('⚠️ Token invalid, clearing cache...');
+    // Clear the invalid token from KV
+    await env.AGENT_PHONE_MAP.delete('dingtalk_access_token');
+    // The next call will fetch a new token automatically
+    return null;
+  }
+  
   if (sendData.errcode !== 0) {
-    console.error(`Send error: ${sendData.errmsg}`);
+    console.error(`Send error: ${sendData.errmsg} (errcode: ${sendData.errcode})`);
   }
   return sendData;
 }
@@ -666,8 +705,12 @@ export default {
       }
 
       let accessToken;
+      let tokenSource = 'unknown';
       try {
-        accessToken = await getCachedAccessToken(env);
+        const tokenResult = await getCachedAccessToken(env);
+        accessToken = tokenResult.token;
+        tokenSource = tokenResult.source;
+        console.log(`📊 Token source: ${tokenSource}`);
       } catch (tokenError) {
         console.error('Token error:', tokenError);
         return new Response(JSON.stringify({ 
