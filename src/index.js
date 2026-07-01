@@ -200,12 +200,16 @@ function escapeHtml(str) {
 // ============================================
 // TEST MESSAGE HANDLER
 // ============================================
-
 async function handleTestMessage(env) {
   const DINGTALK_APP_KEY = env.DINGTALK_APP_KEY;
   const DINGTALK_APP_SECRET = env.DINGTALK_APP_SECRET;
   const DINGTALK_AGENT_ID = env.DINGTALK_AGENT_ID;
-  const TEST_USER_ID = "235618443822-2024983294";
+  
+  // 🔥 TWO test users for batch send
+  const TEST_USER_IDS = [
+    "235618443822-2024983294",  // Kevin Mau
+    "0114073525261965110067"    // Sam Chan
+  ];
   
   let logs = [];
   let requestId = null;
@@ -218,6 +222,7 @@ async function handleTestMessage(env) {
   }
   
   try {
+    // 1. 获取 token
     addLog('🔄 1. 获取 Access Token...');
     const tokenUrl = `https://oapi.dingtalk.com/gettoken?appkey=${DINGTALK_APP_KEY}&appsecret=${DINGTALK_APP_SECRET}`;
     const tokenRes = await fetch(tokenUrl);
@@ -229,17 +234,22 @@ async function handleTestMessage(env) {
     const accessToken = tokenData.access_token;
     addLog(`✅ Token 获取成功: ${accessToken.substring(0, 20)}...`);
     
-    addLog(`🔄 2. 发送消息给 ${TEST_USER_ID}...`);
+    // 2. 🔥 批量发送消息给多个用户
+    addLog(`🔄 2. 批量发送消息给 ${TEST_USER_IDS.length} 个用户...`);
+    addLog(`📋 用户列表: ${TEST_USER_IDS.join(', ')}`);
+    
     const sendUrl = `https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${accessToken}`;
     const sendRes = await fetch(sendUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent_id: parseInt(DINGTALK_AGENT_ID),
-        userid_list: TEST_USER_ID,
+        userid_list: TEST_USER_IDS.join('|'),  // 🔥 Batch send with '|' separator
         msg: {
           msgtype: 'text',
-          text: { content: `🧪 测试消息\n时间: ${new Date().toLocaleString()}\n\n如果你看到这条消息，说明钉钉配置正确！` }
+          text: { 
+            content: `🧪 批量测试消息\n时间: ${new Date().toLocaleString()}\n\n如果你看到这条消息，说明批量发送配置正确！` 
+          }
         }
       })
     });
@@ -256,10 +266,11 @@ async function handleTestMessage(env) {
     }
     
     sendSuccess = true;
-    addLog(`✅ 消息发送成功！`);
+    addLog(`✅ 批量消息发送成功！`);
     addLog(`📋 request_id: ${requestId}`);
     addLog(`📋 task_id: ${taskId}`);
     
+    // 3. 检查消息投递状态
     if (taskId) {
       addLog(`\n🔄 3. 查询消息投递状态...`);
       addLog(`⏳ 等待 3 秒让消息处理完成...`);
@@ -275,21 +286,40 @@ async function handleTestMessage(env) {
         if (statusResult.send_result) {
           const sendResult = statusResult.send_result;
           
+          // 🔥 Check each user's delivery status
+          if (sendResult.invalid_userid_list && sendResult.invalid_userid_list.length > 0) {
+            addLog(`❌ 无效的用户ID: ${sendResult.invalid_userid_list.join(', ')}`, true);
+          }
+          
           if (sendResult.failed_userid_list && sendResult.failed_userid_list.length > 0) {
             addLog(`❌ 投递失败的用户: ${sendResult.failed_userid_list.join(', ')}`, true);
-            addLog(`💡 可能原因: 用户不在应用可见范围内`, true);
-          } else if (sendResult.success_userid_list && sendResult.success_userid_list.length > 0) {
-            addLog(`✅ 消息成功投递到: ${sendResult.success_userid_list.join(', ')}`);
           }
           
-          if (sendResult.invalid_userid_list && sendResult.invalid_userid_list.length > 0) {
-            addLog(`⚠️ 无效的用户ID: ${sendResult.invalid_userid_list.join(', ')}`, true);
-            addLog(`💡 请检查用户ID是否正确`, true);
+          if (sendResult.forbidden_userid_list && sendResult.forbidden_userid_list.length > 0) {
+            addLog(`🚫 被限制的用户 (超频控): ${sendResult.forbidden_userid_list.join(', ')}`, true);
+            addLog(`💡 原因: 今天已收过相同内容的消息`, true);
           }
           
-          if (sendResult.send_progress !== undefined) {
-            addLog(`📊 发送进度: ${sendResult.send_progress}%`);
+          if (sendResult.unread_userid_list && sendResult.unread_userid_list.length > 0) {
+            addLog(`📬 已投递但未读: ${sendResult.unread_userid_list.join(', ')}`);
           }
+          
+          if (sendResult.read_userid_list && sendResult.read_userid_list.length > 0) {
+            addLog(`✅ 已读: ${sendResult.read_userid_list.join(', ')}`);
+          }
+          
+          // Summary
+          const total = TEST_USER_IDS.length;
+          const success = sendResult.read_userid_list ? sendResult.read_userid_list.length : 0;
+          const unread = sendResult.unread_userid_list ? sendResult.unread_userid_list.length : 0;
+          const failed = sendResult.failed_userid_list ? sendResult.failed_userid_list.length : 0;
+          const forbidden = sendResult.forbidden_userid_list ? sendResult.forbidden_userid_list.length : 0;
+          
+          addLog(`\n📊 投递汇总:`);
+          addLog(`   📬 已投递: ${unread + success}/${total}`);
+          addLog(`   ✅ 已读: ${success}/${total}`);
+          addLog(`   ❌ 失败: ${failed}/${total}`);
+          addLog(`   🚫 被限制: ${forbidden}/${total}`);
         }
       } else {
         addLog(`❌ 状态查询失败: ${statusResult.errmsg} (errcode: ${statusResult.errcode})`, true);
@@ -301,6 +331,7 @@ async function handleTestMessage(env) {
     addLog(`❌ 错误: ${err.message}`, true);
   }
   
+  // Helper function to check message status
   async function checkMessageStatus(accessToken, agentId, taskId) {
     const url = `https://oapi.dingtalk.com/topapi/message/corpconversation/getsendresult?access_token=${accessToken}`;
     
@@ -320,12 +351,13 @@ async function handleTestMessage(env) {
     }
   }
   
+  // 返回 HTML 页面显示日志
   return new Response(`
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="UTF-8">
-      <title>钉钉消息测试</title>
+      <title>钉钉批量消息测试</title>
       <style>
         body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
         h1 { color: #4ec9b0; }
@@ -335,6 +367,7 @@ async function handleTestMessage(env) {
         .error { color: #f48771; }
         .info { color: #9cdcfe; }
         .warning { color: #dcdcaa; }
+        .forbidden { color: #ff6b6b; }
         button { background: #0e639c; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 20px; }
         button:hover { background: #1177bb; }
         .status-box { 
@@ -352,8 +385,11 @@ async function handleTestMessage(env) {
       </style>
     </head>
     <body>
-      <h1>🧪 钉钉消息测试</h1>
-      <p>目标 User ID: <code style="background:#2d2d2d;padding:2px 8px;border-radius:4px">${TEST_USER_ID}</code></p>
+      <h1>🧪 钉钉批量消息测试</h1>
+      <p>目标用户 (${TEST_USER_IDS.length} 个):</p>
+      <ul>
+        ${TEST_USER_IDS.map(id => `<li><code style="background:#2d2d2d;padding:2px 8px;border-radius:4px">${id}</code></li>`).join('')}
+      </ul>
       
       <div class="log">
         ${logs.map(log => {
@@ -361,7 +397,8 @@ async function handleTestMessage(env) {
           if (log.msg.includes('✅')) className = 'success';
           else if (log.msg.includes('❌')) className = 'error';
           else if (log.msg.includes('⚠️')) className = 'warning';
-          else if (log.msg.includes('📋') || log.msg.includes('📊')) className = 'info';
+          else if (log.msg.includes('🚫') || log.msg.includes('被限制')) className = 'forbidden';
+          else if (log.msg.includes('📋') || log.msg.includes('📊') || log.msg.includes('📬')) className = 'info';
           return `<div class="log-line ${className}">${escapeHtml(log.msg)}</div>`;
         }).join('')}
       </div>
@@ -382,7 +419,7 @@ async function handleTestMessage(env) {
             💡 如果消息未收到，请检查：
             <br>• 用户是否在应用的<a href="https://open.dingtalk.com/document/orgapp/issue-faq" target="_blank" style="color:#4ec9b0;">可见范围</a>内
             <br>• 用户ID是否正确
-            <br>• 应用是否有足够的权限
+            <br>• 是否触发了<a href="https://open.dingtalk.com/document/orgapp/limitations" target="_blank" style="color:#4ec9b0;">频控限制</a>
           </p>
         </div>
       `}
@@ -801,9 +838,9 @@ export default {
     const path = url.pathname;
     
     // Test route (uncomment when needed)
-    // if (path === '/test' && request.method === 'GET') {
-    //   return handleTestMessage(env);
-    // }
+     if (path === '/test' && request.method === 'GET') {
+       return handleTestMessage(env);
+     }
 
     // IP Test Route
     if (path === '/test-ip' && request.method === 'GET') {
