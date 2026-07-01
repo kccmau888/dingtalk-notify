@@ -1166,10 +1166,10 @@ async function handleVerifyPage(env, url, request) {
       document.getElementById('valueDisplay').innerHTML = '🚫 未有来电/讯息';
       document.getElementById('valueDisplay').style.color = '#6c757d';
     } else if (value === 0) {
-      document.getElementById('valueDisplay').innerHTML = '❌ 拒绝/垃圾';
+      document.getElementById('valueDisplay').innerHTML = '❌ 已拒绝/垃圾线索';
       document.getElementById('valueDisplay').style.color = '#dc3545';
     } else {
-      document.getElementById('valueDisplay').innerHTML = '💰 估值: HK$ ' + value.toLocaleString();
+      document.getElementById('valueDisplay').innerHTML = '💰 预计价值: HK$ ' + value.toLocaleString();
       document.getElementById('valueDisplay').style.color = '#da196e';
     }
     return value;
