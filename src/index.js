@@ -207,8 +207,8 @@ async function handleTestMessage(env) {
   
   // 🔥 TWO test users for batch send
   const TEST_USER_IDS = [
-    "235618443822-2024983294"  // Kevin Mau
-    //"0114073525261965110067"    // Sam Chan
+    "235618443822-2024983294",  // Kevin Mau
+    "0114073525261965110067"    // Sam Chan
   ];
   
   let logs = [];
@@ -247,9 +247,9 @@ async function handleTestMessage(env) {
         userid_list: TEST_USER_IDS.join('|'),  // 🔥 Batch send with '|' separator
         msg: {
           msgtype: 'text',
-          text: { 
-            content: `🧪 批量测试消息\n时间: ${new Date().toLocaleString()}\n\n如果你看到这条消息，说明批量发送配置正确！` 
-          }
+text: { 
+  content: `🧪 批量测试消息 #${Date.now()}\n时间: ${new Date().toLocaleString()}\n\n如果你看到这条消息，说明批量发送配置正确！` 
+}
         }
       })
     });
