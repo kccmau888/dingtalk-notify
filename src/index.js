@@ -965,7 +965,7 @@ async function handleVerifyPage(env, url, request) {
 <body>
 <div class="container"><div class="header"><h1>🔍 线索验证</h1></div>
 <div class="content"><div class="warning-icon">⚠️</div>
-<div class="warning-message"><strong>此线索曾被标记为无效！</strong><br><br>
+<div class="warning-message"><strong>此线索曾被标记为垃圾线索/未有来电！</strong><br><br>
 <div class="info-row"><span class="info-label">原处理代理：</span><span class="info-value">${escapeHtml(rejectedOrNoshowRecord.agent_name) || '未知'}</span></div>
 <div class="info-row"><span class="info-label">原处理时间：</span><span class="info-value">${new Date(rejectedOrNoshowRecord.verified_at).toLocaleString('zh-HK', { timeZone: 'Asia/Hong_Kong' })}</span></div></div>
 <p style="margin-bottom:20px;color:#666;">该线索曾被标记为无效，如需重新确认，请点击下方按钮继续。</p>
@@ -1229,7 +1229,7 @@ async function handleVerifyPage(env, url, request) {
 }
 
 // ============================================
-// MODIFIED: handleVerifyAction with value-based status (Simplified)
+// MODIFIED: handleVerifyAction with value-based status
 // ============================================
 
 async function handleVerifyAction(request, env) {
@@ -1257,14 +1257,14 @@ async function handleVerifyAction(request, env) {
       }
     }
     
-    // Determine status based on final value
+    // 🔥 Determine status based on final value
     let status;
     if (finalValue === 0) {
       status = 'rejected';
     } else if (finalValue === 1) {
-      status = 'verified';  // Noshow
+      status = 'noshow';
     } else {
-      status = 'verified';  // Verified (value > 1)
+      status = 'verified';  // value > 1
     }
     
     // Update the lead
