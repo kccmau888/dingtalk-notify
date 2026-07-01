@@ -142,6 +142,7 @@ async function handleTestMessage(env) {
   let logs = [];
   let requestId = null;
   let taskId = null;
+  let sendSuccess = false;
   
   function addLog(msg, isError = false) {
     logs.push({ msg, isError });
@@ -158,11 +159,12 @@ async function handleTestMessage(env) {
     if (tokenData.errcode !== 0) {
       throw new Error(`Token 失败: ${tokenData.errmsg}`);
     }
-    addLog(`✅ Token 获取成功: ${tokenData.access_token.substring(0, 20)}...`);
+    const accessToken = tokenData.access_token;
+    addLog(`✅ Token 获取成功: ${accessToken.substring(0, 20)}...`);
     
     // 2. 发送消息
     addLog(`🔄 2. 发送消息给 ${TEST_USER_ID}...`);
-    const sendUrl = `https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${tokenData.access_token}`;
+    const sendUrl = `https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${accessToken}`;
     const sendRes = await fetch(sendUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -178,22 +180,84 @@ async function handleTestMessage(env) {
     
     const sendData = await sendRes.json();
     
-    // 尝试从多个地方获取 request_id
     requestId = sendData.request_id || sendData.requestId || '未获取到';
     taskId = sendData.task_id;
     
-    addLog(`📋 响应体: ${JSON.stringify(sendData)}`);
+    addLog(`📋 发送响应体: ${JSON.stringify(sendData)}`);
     
     if (sendData.errcode !== 0) {
       throw new Error(`发送失败: ${sendData.errmsg} (errcode: ${sendData.errcode})`);
     }
     
+    sendSuccess = true;
     addLog(`✅ 消息发送成功！`);
     addLog(`📋 request_id: ${requestId}`);
     addLog(`📋 task_id: ${taskId}`);
     
+    // 3. 检查消息投递状态 (Wait a moment for processing)
+    if (taskId) {
+      addLog(`\n🔄 3. 查询消息投递状态...`);
+      addLog(`⏳ 等待 3 秒让消息处理完成...`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const statusResult = await checkMessageStatus(accessToken, parseInt(DINGTALK_AGENT_ID), taskId);
+      
+      addLog(`📋 投递状态响应: ${JSON.stringify(statusResult, null, 2)}`);
+      
+      if (statusResult.errcode === 0) {
+        addLog(`✅ 状态查询成功！`);
+        
+        // Parse and display delivery status
+        if (statusResult.send_result) {
+          const sendResult = statusResult.send_result;
+          
+          // Check if there's a failed list
+          if (sendResult.failed_userid_list && sendResult.failed_userid_list.length > 0) {
+            addLog(`❌ 投递失败的用户: ${sendResult.failed_userid_list.join(', ')}`, true);
+            addLog(`💡 可能原因: 用户不在应用可见范围内`, true);
+          } else if (sendResult.success_userid_list && sendResult.success_userid_list.length > 0) {
+            addLog(`✅ 消息成功投递到: ${sendResult.success_userid_list.join(', ')}`);
+          }
+          
+          // Check for invalid users
+          if (sendResult.invalid_userid_list && sendResult.invalid_userid_list.length > 0) {
+            addLog(`⚠️ 无效的用户ID: ${sendResult.invalid_userid_list.join(', ')}`, true);
+            addLog(`💡 请检查用户ID是否正确`, true);
+          }
+          
+          // Show send progress
+          if (sendResult.send_progress !== undefined) {
+            addLog(`📊 发送进度: ${sendResult.send_progress}%`);
+          }
+        }
+      } else {
+        addLog(`❌ 状态查询失败: ${statusResult.errmsg} (errcode: ${statusResult.errcode})`, true);
+        addLog(`💡 可能原因: task_id 无效或超过查询时限(24小时)`, true);
+      }
+    }
+    
   } catch (err) {
     addLog(`❌ 错误: ${err.message}`, true);
+  }
+  
+  // Helper function to check message status
+  async function checkMessageStatus(accessToken, agentId, taskId) {
+    const url = `https://oapi.dingtalk.com/topapi/message/corpconversation/getsendresult?access_token=${accessToken}`;
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: agentId,
+          task_id: taskId
+        })
+      });
+      
+      return await response.json();
+    } catch (error) {
+      return { errcode: -1, errmsg: `查询失败: ${error.message}` };
+    }
   }
   
   // 返回 HTML 页面显示日志
@@ -206,7 +270,7 @@ async function handleTestMessage(env) {
       <style>
         body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
         h1 { color: #4ec9b0; }
-        .log { background: #2d2d2d; padding: 15px; border-radius: 8px; margin-top: 20px; max-height: 500px; overflow: auto; }
+        .log { background: #2d2d2d; padding: 15px; border-radius: 8px; margin-top: 20px; max-height: 600px; overflow: auto; }
         .log-line { font-family: monospace; margin: 5px 0; white-space: pre-wrap; word-break: break-all; }
         .success { color: #4ec9b0; }
         .error { color: #f48771; }
@@ -214,28 +278,73 @@ async function handleTestMessage(env) {
         .warning { color: #dcdcaa; }
         button { background: #0e639c; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 20px; }
         button:hover { background: #1177bb; }
+        .status-box { 
+          background: #2d2d2d; 
+          padding: 15px; 
+          border-radius: 8px; 
+          margin-top: 10px;
+          border-left: 4px solid #4ec9b0;
+        }
+        .status-box.error { border-left-color: #f48771; }
+        .status-box.warning { border-left-color: #dcdcaa; }
+        .summary { margin-top: 10px; padding: 10px; background: #252525; border-radius: 5px; }
+        .label { color: #9cdcfe; }
+        .value { color: #4ec9b0; }
       </style>
     </head>
     <body>
       <h1>🧪 钉钉消息测试</h1>
       <p>目标 User ID: <code style="background:#2d2d2d;padding:2px 8px;border-radius:4px">${TEST_USER_ID}</code></p>
+      
       <div class="log">
         ${logs.map(log => {
           let className = 'info';
           if (log.msg.includes('✅')) className = 'success';
           else if (log.msg.includes('❌')) className = 'error';
           else if (log.msg.includes('⚠️')) className = 'warning';
-          else if (log.msg.includes('📋')) className = 'info';
+          else if (log.msg.includes('📋') || log.msg.includes('📊')) className = 'info';
           return `<div class="log-line ${className}">${escapeHtml(log.msg)}</div>`;
         }).join('')}
       </div>
+      
+      ${!sendSuccess ? `
+        <div class="status-box error" style="margin-top:20px;">
+          <strong>⚠️ 消息发送失败</strong>
+          <p>请检查上面的错误信息进行排查。</p>
+        </div>
+      ` : `
+        <div class="status-box" style="margin-top:20px;">
+          <strong>✅ 测试完成</strong>
+          <div class="summary">
+            <div><span class="label">Task ID:</span> <span class="value">${taskId || 'N/A'}</span></div>
+            <div><span class="label">Request ID:</span> <span class="value">${requestId || 'N/A'}</span></div>
+          </div>
+          <p style="margin-top:10px;font-size:13px;color:#808080;">
+            💡 如果消息未收到，请检查：
+            <br>• 用户是否在应用的<a href="https://open.dingtalk.com/document/orgapp/issue-faq" target="_blank" style="color:#4ec9b0;">可见范围</a>内
+            <br>• 用户ID是否正确
+            <br>• 应用是否有足够的权限
+          </p>
+        </div>
+      `}
+      
       <button onclick="location.reload()">🔄 再次测试</button>
       <p style="margin-top:20px;font-size:12px;color:#808080;">测试时间: ${new Date().toLocaleString()}</p>
-      <p style="font-size:11px;color:#808080;">💡 提示：消息发送成功但用户未收到，通常是<a href="https://open.dingtalk.com/document/orgapp/issue-faq" target="_blank" style="color:#4ec9b0;">应用可见范围</a>问题</p>
     </body>
     </html>
   `, {
     headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// Helper function for HTML escaping
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>]/g, function(m) {
+    if (m === '&') return '&amp;';
+    if (m === '<') return '&lt;';
+    if (m === '>') return '&gt;';
+    return m;
   });
 }
 
