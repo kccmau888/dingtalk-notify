@@ -244,7 +244,7 @@ async function handleTestMessage(env) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent_id: parseInt(DINGTALK_AGENT_ID),
-        userid_list: TEST_USER_IDS.join('|'),  // 🔥 Batch send with '|' separator
+        userid_list: TEST_USER_IDS.join(','),  // 🔥 Batch send with '|' separator
         msg: {
           msgtype: 'text',
 text: { 
