@@ -70,7 +70,7 @@ async function sendDingTalkMessage(accessToken, agentId, userIds, title, text, e
   if (!userIds || userIds.length === 0) return null;
   
   const MAX_RETRIES = 2;
-  const useridList = userIds.join('|');
+  const useridList = userIds.join(',');
   
   try {
     const sendRes = await fetch(`https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=${accessToken}`, {
