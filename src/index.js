@@ -927,7 +927,7 @@ async function handleVerifyPage(env, url, request) {
   const rejectedRecord = await env.lead_db.prepare(`
     SELECT id, agent_name, verified_by, verified_at, status, value
     FROM leads 
-    WHERE client_id = ? AND status = 'rejected' OR value = 1
+    WHERE (client_id = ? AND (status = 'rejected' OR value = 1)
     ORDER BY verified_at DESC
     LIMIT 1
   `).bind(lead.client_id).first();
