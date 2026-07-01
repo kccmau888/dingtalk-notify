@@ -1229,7 +1229,7 @@ async function handleVerifyPage(env, url, request) {
 }
 
 // ============================================
-// MODIFIED: handleVerifyAction with value-based status
+// MODIFIED: handleVerifyAction with value-based status (No Default)
 // ============================================
 
 async function handleVerifyAction(request, env) {
@@ -1247,14 +1247,20 @@ async function handleVerifyAction(request, env) {
     const verifiedBy = verified_by || 'system';
     
     let finalValue = value;
+    let finalTransactionType = transaction_type;
     
-    // If in recovery mode, convert 0 or 1 to a valid verified value
+    // 🔥 If value is 0 or 1, set transaction_type to 'rent'
+    if (value === 0 || value === 1) {
+      finalTransactionType = 'rent';
+    }
+    
+    // 🔥 In recovery mode, use the value the agent selected from the dropdown
+    // No default value is set - the agent must choose a budget range
     if (is_recovery) {
-      if (value === 0 || value === 1) {
-        finalValue = 2000;  // Default verified value
-      } else {
-        finalValue = value;
-      }
+      // Just use whatever value was passed from the frontend
+      finalValue = value;
+      // Keep transaction_type as 'rent' (it was already set when rejected/noshow)
+      finalTransactionType = 'rent';
     }
     
     // 🔥 Determine status based on final value
@@ -1273,7 +1279,7 @@ async function handleVerifyAction(request, env) {
       SET status = ?, verified_at = ?, verified_by = ?,
           district = ?, transaction_type = ?, budget_range = ?, value = ?
       WHERE id = ?
-    `).bind(status, now, verifiedBy, district, transaction_type, budget_range, finalValue, id).run();
+    `).bind(status, now, verifiedBy, district, finalTransactionType, budget_range, finalValue, id).run();
     
     if (result.meta.rows_written === 0) {
       return new Response(JSON.stringify({ error: '线索不存在' }), {
