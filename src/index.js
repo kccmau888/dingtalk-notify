@@ -607,7 +607,14 @@ async function handleVerifyPage(env, url, request) {
     
     setDefaultBudgetRange();
   }
-  
+
+  function formatUrl(url) {
+    if (!url || url === '未知' || url === '') return '未知';
+    // Limit URL length for clean display
+    const displayText = url.length > 50 ? url.substring(0, 50) + '...' : url;
+    return `[${displayText}](${url})`;
+  }
+
   function calculateValue() {
     const type = document.getElementById('type').value;
     const range = document.getElementById('budgetRange').value;
@@ -1077,6 +1084,7 @@ export default {
       // Save to database
       let leadId = null;
       let dbError = null;
+      let timeToConversion = null;
       try {
         const insertStmt = await env.lead_db.prepare(`
           INSERT INTO leads (
@@ -1092,7 +1100,7 @@ export default {
 
         const result = await insertStmt.bind(
           client_id, agent_display_name, agent_phone, click_type,
-          rent, property_price, size, district, property_type,
+          rent, property_price, size, district, property_type, 
           page_location, referrer, landing_page,
           utm_source, utm_medium, utm_campaign, utm_term, utm_content,
           gclid, traffic_type, traffic_source, traffic_detail,
@@ -1102,6 +1110,14 @@ export default {
 
         leadId = result.meta.last_row_id;
         console.log(`✅ Lead saved, ID: ${leadId} | Agent: ${agent_display_name} | IP: ${clientInfo.user_ip} | Country: ${clientInfo.user_country}`);
+        if (leadId) {
+          const leadData = await env.lead_db.prepare(`
+            SELECT time_to_conversion FROM leads WHERE id = ?
+          `).bind(leadId).first();
+          
+          timeToConversion = leadData ? leadData.time_to_conversion : '未记录';
+          console.log(`✅ time_to_conversion: ${timeToConversion}`);
+        }      
       } catch (error) {
         dbError = error;
         console.error('❌ Database insert error:', error);
@@ -1225,6 +1241,7 @@ export default {
       let messageText = `## 📞 新线索通知\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
+        `**转化时间:** ${timeToConversion || 'N/A'}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
@@ -1244,10 +1261,10 @@ export default {
       messageText += `${marketingInfo}\n\n` +
         `---\n\n` +
         `### 🌐 落地页\n\n` +
-        `${landing_page || '未知'}\n\n` +
+        `${formatUrl(landing_page)}\n\n` +
         `---\n\n` +
         `### 📍 点击页面\n\n` +
-        `${page_location || '未知'}\n\n` +
+        `${formatUrl(page_location)}\n\n` +
         `---\n\n` +
         `### 🔗 [验证线索](${verifyUrl})\n\n` +
         `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
@@ -1268,6 +1285,7 @@ export default {
       const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
+        `**转化时间:** ${timeToConversion || 'N/A'}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
@@ -1283,10 +1301,10 @@ export default {
         `${marketingInfo}\n\n` +
         `---\n\n` +
         `### 🌐 落地页\n\n` +
-        `${landing_page || '未知'}\n\n` +
+        `${formatUrl(landing_page)}\n\n` +
         `---\n\n` +
         `### 📍 点击页面\n\n` +
-        `${page_location || '未知'}\n\n` +
+        `${formatUrl(page_location)}\n\n` +
         `---\n\n` +
         `### 🔗 [验证线索](${verifyUrl})\n\n` +
         `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
