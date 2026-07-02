@@ -123,6 +123,12 @@ async function sendDingTalkMessage(accessToken, agentId, userIds, title, text, e
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+function formatUrl(url) {
+  if (!url || url === '未知' || url === '') return '未知';
+  // Limit URL length for clean display
+  const displayText = url.length > 50 ? url.substring(0, 50) + '...' : url;
+  return `[${displayText}](${url})`;
+}
 
 function getParamFromLandingPage(landing_page, paramName) {
   if (!landing_page || typeof landing_page !== 'string') return '';
@@ -608,13 +614,6 @@ async function handleVerifyPage(env, url, request) {
     setDefaultBudgetRange();
   }
 
-  function formatUrl(url) {
-    if (!url || url === '未知' || url === '') return '未知';
-    // Limit URL length for clean display
-    const displayText = url.length > 50 ? url.substring(0, 50) + '...' : url;
-    return `[${displayText}](${url})`;
-  }
-
   function calculateValue() {
     const type = document.getElementById('type').value;
     const range = document.getElementById('budgetRange').value;
@@ -1084,7 +1083,7 @@ export default {
       // Save to database
       let leadId = null;
       let dbError = null;
-      let TimeToConversion = null;
+      let TimeToConversion = '未记录';
       try {
         const insertStmt = await env.lead_db.prepare(`
           INSERT INTO leads (
@@ -1241,7 +1240,7 @@ export default {
       let messageText = `## 📞 新线索通知\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
-        `**转化时间:** ${TimeToConversion || 'N/A'}\n\n` +
+        `**转化时间:** ${TimeToConversion}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
@@ -1285,7 +1284,7 @@ export default {
       const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
-        `**转化时间:** ${TimeToConversion || 'N/A'}\n\n` +
+        `**转化时间:** ${TimeToConversion}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
