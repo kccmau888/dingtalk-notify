@@ -1084,7 +1084,7 @@ export default {
       // Save to database
       let leadId = null;
       let dbError = null;
-      let timeToConversion = null;
+      let TimeToConversion = null;
       try {
         const insertStmt = await env.lead_db.prepare(`
           INSERT INTO leads (
@@ -1115,8 +1115,8 @@ export default {
             SELECT time_to_conversion FROM leads WHERE id = ?
           `).bind(leadId).first();
           
-          timeToConversion = leadData ? leadData.time_to_conversion : '未记录';
-          console.log(`✅ time_to_conversion: ${timeToConversion}`);
+          TimeToConversion = leadData ? leadData.time_to_conversion : '未记录';
+          console.log(`✅ time_to_conversion: ${TimeToConversion}`);
         }      
       } catch (error) {
         dbError = error;
@@ -1241,7 +1241,7 @@ export default {
       let messageText = `## 📞 新线索通知\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
-        `**转化时间:** ${timeToConversion || 'N/A'}\n\n` +
+        `**转化时间:** ${TimeToConversion || 'N/A'}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
@@ -1285,7 +1285,7 @@ export default {
       const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
-        `**转化时间:** ${timeToConversion || 'N/A'}\n\n` +
+        `**转化时间:** ${TimeToConversion || 'N/A'}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
