@@ -123,6 +123,28 @@ async function sendDingTalkMessage(accessToken, agentId, userIds, title, text, e
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+function formatTimeToConversion(timeStr) {
+  if (!timeStr || timeStr === '未记录') return '未记录';
+  
+  // Parse HH:MM:SS format
+  const parts = timeStr.split(':');
+  if (parts.length !== 3) return timeStr;
+  
+  const hours = parseInt(parts[0]);
+  const minutes = parseInt(parts[1]);
+  const seconds = parseInt(parts[2]);
+  
+  // Calculate total seconds
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+  
+  // If less than 1 minute (60 seconds), show in red
+  if (totalSeconds < 60) {
+    return `<font color="red">${timeStr}</font>`;
+  }
+  
+  return timeStr;
+}
+
 function formatUrl(url) {
   if (!url || url === '未知' || url === '') return '未知';
   // Limit URL length for clean display
@@ -1240,7 +1262,7 @@ export default {
       let messageText = `## 📞 新线索通知\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
-        `**转化时间:** ${TimeToConversion}\n\n` +
+        `**转化时间:** ${formatTimeToConversion(TimeToConversion)}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
@@ -1284,13 +1306,12 @@ export default {
       const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
-        `**转化时间:** ${TimeToConversion}\n\n` +
+        `**转化时间:** ${formatTimeToConversion(TimeToConversion)}\n\n` +
         `---\n\n` +
         `**客号:** \`${client_id}\`\n\n` +
         `**IP:** ${clientInfo.user_ip}\n\n` +
         `**地区:** ${clientInfo.user_country}\n\n` +
         `**代理:** ${agent_display_name}\n\n` +
-        `**代理电话:** ${agent_phone}\n\n` +
         `---\n\n` +
         `${propertyInfo}\n\n` +
         `---\n\n` +
