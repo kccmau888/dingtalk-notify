@@ -1258,8 +1258,8 @@ export default {
       const host = request.headers.get('host');
       const verifyUrl = `https://${host}/verify?id=${leadId}`;
 
-      // Build unified message
-      let unifiedMessageText = `## 📞 新线索通知\n\n` +
+      // Build message
+      let messageText = `## 📞 新线索通知\n\n` +
         `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
         `${formattedTime}\n\n` +
         `**转化时间:** ${formatTimeToConversion(TimeToConversion)}\n\n` +
@@ -1274,12 +1274,12 @@ export default {
         `---\n\n` +
         `### 🎯 线索来源\n\n` +
         `**接收模式:** ${click_type || '未知'}\n\n`;
-
+      
       if (search_query) {
-        unifiedMessageText += `**🔍 搜索词:** ${search_query}\n\n`;
+        messageText += `**🔍 搜索词:** ${search_query}\n\n`;
       }
-
-      unifiedMessageText += `${marketingInfo}\n\n` +
+      
+      messageText += `${marketingInfo}\n\n` +
         `---\n\n` +
         `### 🌐 落地页\n\n` +
         `${formatUrl(landing_page)}\n\n` +
@@ -1291,51 +1291,107 @@ export default {
         `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
         `---\n\n` +
         `${repeatWarning}${historySection}`;
-
-      let totalSentCount = 0;
-      const allRecipients = [];
-
-      // Add agent if exists
+      
+      // Send to agent
+      let agentSentCount = 0;
       if (agent_dingtalk_id) {
-        allRecipients.push(agent_dingtalk_id);
-      }
-
-      // Add admins
-      try {
-        const { results } = await env.lead_db.prepare(`
-          SELECT dingtalk_id FROM agents WHERE admin = 1 AND is_active = 1 AND dingtalk_id IS NOT NULL
-        `).all();
-        
-        const adminDingtalkIds = results.map(row => row.dingtalk_id);
-        allRecipients.push(...adminDingtalkIds);
-      } catch (adminError) {
-        console.error('Admin query error:', adminError);
-      }
-
-      // 🔥 Send to ALL recipients in ONE API call
-      if (allRecipients.length > 0) {
-        console.log(`📤 Sending unified message to ${allRecipients.length} recipients:`, allRecipients);
-        
-        const sendResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), allRecipients, '📞 新线索通知', unifiedMessageText, env);
-        
-        if (sendResult && sendResult.errcode === 0) {
-          totalSentCount = allRecipients.length;
-          console.log(`✅ Message sent to ${totalSentCount} recipients (1 API call)`);
-        } else {
-          console.error(`❌ Unified send failed: ${sendResult ? sendResult.errmsg : 'Unknown error'}`);
-        }
+        await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), [agent_dingtalk_id], '📞 新线索通知', messageText, env);
+        agentSentCount = 1;
+        console.log(`✅ Message sent to agent: ${agent_display_name} (${agent_dingtalk_id})`);
       } else {
-        console.warn('⚠️ No recipients found, message not sent.');
+        console.warn(`⚠️ No dingtalk_id for agent: ${agent_display_name}, message not sent.`);
       }
 
-      // Return response
+      // Send to admins
+      const adminMessageText = `## 📋 线索副本 (管理员)\n\n` +
+        `**线索ID:** \`#${leadId || 'N/A'}\`\n\n` +
+        `${formattedTime}\n\n` +
+        `**转化时间:** ${formatTimeToConversion(TimeToConversion)}\n\n` +
+        `---\n\n` +
+        `**客号:** \`${client_id}\`\n\n` +
+        `**IP:** ${clientInfo.user_ip}\n\n` +
+        `**地区:** ${clientInfo.user_country}\n\n` +
+        `**代理:** ${agent_display_name}\n\n` +
+        `---\n\n` +
+        `${propertyInfo}\n\n` +
+        `---\n\n` +
+        `### 🎯 线索来源\n\n` +
+        `**接收模式:** ${click_type || '未知'}\n\n` +
+        (search_query ? `**🔍 搜索词:** ${search_query}\n\n` : '') +
+        `${marketingInfo}\n\n` +
+        `---\n\n` +
+        `### 🌐 落地页\n\n` +
+        `${formatUrl(landing_page)}\n\n` +
+        `---\n\n` +
+        `### 📍 点击页面\n\n` +
+        `${formatUrl(page_location)}\n\n` +
+        `---\n\n` +
+        `### 🔗 [验证线索](${verifyUrl})\n\n` +
+        `⚠️<font color="red">优先跟进权归首位确认线索者所有</font>\n\n` +
+        `---\n\n` +
+        `⚠️ 此消息为系统自动发送的副本。${historySection}`;
+
+      let adminSentCount = 0;
+        try {
+          const { results } = await env.lead_db.prepare(`
+            SELECT dingtalk_id FROM agents WHERE admin = 1 AND is_active = 1 AND dingtalk_id IS NOT NULL
+          `).all();
+          
+          const adminDingtalkIds = results.map(row => row.dingtalk_id);
+          
+          console.log(`📋 Admin IDs found: [${adminDingtalkIds.join(', ')}]`);
+          console.log(`📋 Admin count: ${adminDingtalkIds.length}`);
+          
+          if (adminDingtalkIds.length > 0) {
+            // 🔥 BATCH SEND - Log the request
+            console.log(`📤 Sending batch to: ${adminDingtalkIds.join('|')}`);
+            
+            const sendResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), adminDingtalkIds, '📋 线索副本', adminMessageText, env);
+            
+            // 🔥 Log the FULL response
+            console.log(`📊 Full admin send response: ${JSON.stringify(sendResult)}`);
+            
+            if (sendResult && sendResult.errcode === 0) {
+              adminSentCount = adminDingtalkIds.length;
+              console.log(`✅ Message sent to ${adminSentCount} admin(s) (1 API call)`);
+            } else if (sendResult) {
+              console.error(`❌ Admin batch send FAILED:`);
+              console.error(`   errcode: ${sendResult.errcode}`);
+              console.error(`   errmsg: ${sendResult.errmsg}`);
+              console.error(`   Full response: ${JSON.stringify(sendResult)}`);
+              
+              // 🔥 FALLBACK: Try sending individually to identify the problem
+              console.log(`🔄 Attempting individual sends...`);
+              for (const adminId of adminDingtalkIds) {
+                try {
+                  const singleResult = await sendDingTalkMessage(accessToken, parseInt(DINGTALK_AGENT_ID), [adminId], '📋 线索副本', adminMessageText, env);
+                  if (singleResult && singleResult.errcode === 0) {
+                    adminSentCount++;
+                    console.log(`✅ Admin ${adminId} - SUCCESS`);
+                  } else {
+                    console.error(`❌ Admin ${adminId} - FAILED: ${singleResult ? singleResult.errmsg : 'Unknown'}`);
+                  }
+                } catch (e) {
+                  console.error(`❌ Admin ${adminId} - ERROR:`, e.message);
+                }
+              }
+              console.log(`📊 Individual send summary: ${adminSentCount}/${adminDingtalkIds.length} admins received`);
+            }
+          } else {
+            console.log('📭 No admins found');
+          }
+        } catch (adminError) {
+          console.error('Admin query error:', adminError);
+        }
+
       return new Response(JSON.stringify({ 
         success: true, 
         lead_id: leadId,
         client_id: client_id,
         agent_mapped: agent_found,
         agent_display_name: agent_display_name,
-        total_recipients: totalSentCount,
+        agent_message_sent: agentSentCount,
+        admin_copies_sent: adminSentCount,
         history_count: historyRecords.length,
         db_error: dbError ? dbError.message : null,
         user_ip: clientInfo.user_ip,
@@ -1344,3 +1400,13 @@ export default {
         status: 200,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
       });
+
+    } catch (error) {
+      console.error('Worker error:', error);
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+  },
+};
