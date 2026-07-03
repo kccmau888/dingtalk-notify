@@ -1253,7 +1253,6 @@ export default {
           }
         }
       }
-
       const repeatWarning = data.previous_conversion ? '\n\n⚠️ **该用户之前已点击过咨询按钮！**' : '';
       const host = request.headers.get('host');
       const verifyUrl = `https://${host}/verify?id=${leadId}`;
