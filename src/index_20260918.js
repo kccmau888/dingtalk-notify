@@ -192,7 +192,6 @@ function calculateValue(type, range, baseRent, basePrice) {
   
   if (range === '0') return 0;
   if (range === '1') return 1;
-  if (range === 'listing') return 1000;   // ← 新增：放盤
   
   if (type === 'rent') {
     switch (range) {
@@ -568,7 +567,6 @@ async function handleVerifyPage(env, url, request) {
   const rentOptions = [
     { value: '0', label: '0 (拒绝/垃圾)', baseValue: 0 },
     { value: '1', label: '未有来电', baseValue: 1 },
-    { value: 'listing', label: '放盤', baseValue: 1000 },   // ← 新增：放盤
     { value: 'below_20k', label: 'Below 2萬', baseValue: 20000 },
     { value: '20k_50k', label: '2萬 - 5萬', baseValue: 35000 },
     { value: '50k_80k', label: '5萬 - 8萬', baseValue: 65000 },
@@ -580,7 +578,6 @@ async function handleVerifyPage(env, url, request) {
   const buyOptions = [
     { value: '0', label: '0 (拒绝/垃圾)', baseValue: 0 },
     { value: '1', label: '未有来电', baseValue: 1 },
-    { value: 'listing', label: '放盤', baseValue: 1000 },   // ← 新增：放盤
     { value: 'below_8m', label: 'Below 800萬', baseValue: 8000000 },
     { value: '8m_15m', label: '800萬 - 1500萬', baseValue: 11500000 },
     { value: '15m_20m', label: '1500萬 - 2000萬', baseValue: 17500000 },
@@ -633,10 +630,6 @@ async function handleVerifyPage(env, url, request) {
         option.style.color = opt.value === '0' ? '#dc3545' : '#6c757d';
         option.style.fontWeight = 'bold';
       }
-      if (opt.value === 'listing') {                    // ← 新增：放盤蓝色
-        option.style.color = '#1976d2';
-        option.style.fontWeight = 'bold';
-      }
       select.appendChild(option);
     }
     
@@ -652,8 +645,6 @@ async function handleVerifyPage(env, url, request) {
       value = 0;
     } else if (range === '1') {
       value = 1;
-    } else if (range === 'listing') {                     // ← 新增：放盤
-      value = 1000;
     } else if (type === 'rent') {
       switch(range) {
         case 'below_20k': value = 2000; break;
@@ -681,9 +672,6 @@ async function handleVerifyPage(env, url, request) {
     } else if (value === 0) {
       document.getElementById('valueDisplay').innerHTML = '❌ 拒绝/垃圾';
       document.getElementById('valueDisplay').style.color = '#dc3545';
-    } else if (value === 1000) {                          // ← 新增：放盤
-      document.getElementById('valueDisplay').innerHTML = '🏠 放盤 (HK$ 1,000)';
-      document.getElementById('valueDisplay').style.color = '#1976d2';
     } else {
       document.getElementById('valueDisplay').innerHTML = '💰 估值: HK$ ' + value.toLocaleString();
       document.getElementById('valueDisplay').style.color = '#da196e';
@@ -853,8 +841,6 @@ async function handleVerifyAction(request, env) {
       status = 'rejected';
     } else if (finalValue === 1) {
       status = 'noshow';
-    } else if (finalValue === 1000) {                     // ← 新增：放盤
-      status = 'listing';
     } else {
       status = 'verified';
     }
