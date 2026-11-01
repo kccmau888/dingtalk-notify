@@ -1017,6 +1017,7 @@ export default {
       const utm_content = String(data.utm_content || '');
       const gclid = String(data.gclid || '');
       const referrer = String(data.referrer || '');
+      const persistent_gclid = String(data.persistent_gclid || '');
       
       const traffic_type = String(data.traffic_type || '');
       const traffic_source = String(data.traffic_source || '');
@@ -1129,8 +1130,8 @@ export default {
             utm_source, utm_medium, utm_campaign, utm_term, utm_content,
             gclid, traffic_type, traffic_source, traffic_detail,
             search_query, status, utm_id, created_at,
-            user_ip, user_country, user_agent
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_ip, user_country, user_agent, persistent_gclid
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const result = await insertStmt.bind(
@@ -1140,7 +1141,8 @@ export default {
           utm_source, utm_medium, utm_campaign, utm_term, utm_content,
           gclid, traffic_type, traffic_source, traffic_detail,
           search_query, 'pending', utm_id, isoTime,
-          clientInfo.user_ip, clientInfo.user_country, clientInfo.user_agent
+          clientInfo.user_ip, clientInfo.user_country, clientInfo.user_agent,
+          persistent_gclid
         ).run();
 
         leadId = result.meta.last_row_id;
