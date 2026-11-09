@@ -1022,7 +1022,7 @@ export default {
       const traffic_type = String(data.traffic_type || '');
       const traffic_source = String(data.traffic_source || '');
       const traffic_detail = String(data.traffic_detail || '');
-      const utm_id = String(data.utm_id || '');
+      const utm_id = getParamFromLandingPage(landing_page, 'utm_id') || String(data.utm_id || '');
 
       // Extract search query
       let search_query = '';
